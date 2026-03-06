@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}Toutes les cartes ({{ cards|length }}) — CarteIdéale{% endblock %}
+
+{% block content %}
+<section class="section">
+    <div class="container">
+        <div class="page-header">
+            <h1 class="page-title">Base de données des cartes</h1>
+            <p class="page-subtitle">{{ cards|length }} cartes affichées sur {{ total }} au total</p>
+        </div>
+
+        <!-- Filtres -->
+        <form method="GET" class="filters-bar">
+            <div class="filter-group">
+                <label class="filter-label">Réseau</label>
+                <select name="network" class="filter-select" onchange="this.form.submit()">
+                    <option value="">Tous</option>
+                    <option value="Visa" {% if network_filter == 'Visa' %}selected{% endif %}>Visa</option>
+                    <option value="Mastercard" {% if network_filter == 'Mastercard' %}selected{% endif %}>Mastercard</option>
+                    <option value="American Express" {% if network_filter == 'American Express' %}selected{% endif %}>American Express</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label class="filter-label">Catégorie</label>
+                <select name="tier" class="filter-select" onchange="this.form.submit()">
+                    <option value="">Toutes</option>
+                    <option value="cashback" {% if tier_filter == 'cashback' %}selected{% endif %}>Cashback</option>
+                    <option value="travel" {% if tier_filter == 'travel' %}selected{% endif %}>Voyage</option>
+                    <option value="rewards" {% if tier_filter == 'rewards' %}selected{% endif %}>Récompenses</option>
+                    <option value="premium" {% if tier_filter == 'premium' %}selected{% endif %}>Premium</option>
+                    <option value="no_fee" {% if tier_filter == 'no_fee' %}selected{% endif %}>Taux réduit</option>
+                    <option value="student" {% if tier_filter == 'student' %}selected{% endif %}>Étudiant</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label class="filter-label">Frais max</label>
+                <select name="max_fee" class="filter-select" onchange="this.form.submit()">
+                    <option value="">Tous</option>
+                    <option value="0">Sans frais</option>
+                    <option value="100">Moins de 100$</option>
+                    <option value="150">Moins de 150$</option>
+                    <option value="300">Moins de 300$</option>
+                </select>
+            </div>
+            <a href="{{ url_for('all_cards') }}" class="btn btn-ghost btn-sm">Réinitialiser</a>
+        </form>
+
+        <!-- Grille de cartes -->
+        <div class="cards-grid">
+            {% for card in cards %}
+            <div class="card-item">
+                <div class="card-item-header">
+                    <div class="card-item-name">{{ card.name }}</div>
+                    <span class="card-item-network card-network-{{ card.network.value|lower|replace(' ', '-') }}">
+                        {{ card.network.value }}
+                    </span>
+                </div>
+                <div class="card-item-issuer">{{ card.issuer }}</div>
+                <div class="card-item-stats">
+                    <div class="card-stat">
+                        <span class="card-stat-label">Frais annuels</span>
+                        <span class="card-stat-value">{{ card.annual_fee }}$</span>
+                    </div>
+                    <div class="card-stat">
+                        <span class="card-stat-label">Taux de base</span>
+                        <span class="card-stat-value">{{ card.base_rate }}%</span>
+                    </div>
+                    {% if card.welcome_bonus > 0 %}
+                    <div class="card-stat">
+                        <span class="card-stat-label">Bonus bienvenue</span>
+                        <span class="card-stat-value card-stat-bonus">~{{ card.welcome_bonus|int }}$</span>
+                    </div>
+                    {% endif %}
+                </div>
+                {% if card.reward_program and card.reward_program != "None" %}
+                <div class="card-item-program">{{ card.reward_program }}</div>
+                {% endif %}
+                <div class="card-item-features">
+                    {% if card.insurance.travel_medical %}
+                    <span class="feature-tag"><i class="fas fa-heart-pulse"></i></span>
+                    {% endif %}
+                    {% if card.travel_perks.lounge_access %}
+                    <span class="feature-tag"><i class="fas fa-couch"></i></span>
+                    {% endif %}
+                    {% if card.annual_fee == 0 %}
+                    <span class="feature-tag feature-tag-free">Sans frais</span>
+                    {% endif %}
+                    {% if card.first_year_free %}
+                    <span class="feature-tag feature-tag-first">1re année gratuite</span>
+                    {% endif %}
+                    {% if not card.compatible_with_costco %}
+                    <span class="feature-tag feature-tag-warn">Pas chez Costco</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="cards-cta">
+            <p>Pour savoir quelle carte vous convient le mieux...</p>
+            <a href="{{ url_for('questionnaire_start') }}" class="btn btn-primary btn-lg">
+                <i class="fas fa-wand-magic-sparkles"></i>
+                Faire l'analyse personnalisée
+            </a>
+        </div>
+    </div>
+</section>
+{% endblock %}

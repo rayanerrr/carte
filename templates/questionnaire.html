@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}Questionnaire — Section {{ section_id }}/{{ total_sections }} — CarteIdéale{% endblock %}
+
+{% block content %}
+<div class="questionnaire-layout">
+
+    <!-- Sidebar: Navigation des sections -->
+    <aside class="q-sidebar">
+        <div class="q-sidebar-inner">
+            <div class="q-sidebar-header">
+                <span class="q-sidebar-title">Sections</span>
+                <span class="q-sidebar-progress">{{ section_id }}/{{ total_sections }}</span>
+            </div>
+            <nav class="q-nav">
+                {% for s in sections %}
+                <div class="q-nav-item {% if s.id == section_id %}active{% elif s.id < section_id %}done{% endif %}">
+                    <div class="q-nav-icon">
+                        {% if s.id < section_id %}
+                            <i class="fas fa-check"></i>
+                        {% else %}
+                            <i class="fas fa-{{ s.icon }}"></i>
+                        {% endif %}
+                    </div>
+                    <span class="q-nav-label">{{ s.name }}</span>
+                </div>
+                {% endfor %}
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Main: Formulaire -->
+    <main class="q-main">
+        <!-- Progress Bar -->
+        <div class="q-progress-bar">
+            <div class="q-progress-fill" style="width: {{ progress_pct }}%"></div>
+        </div>
+
+        <div class="q-container">
+            <!-- Section Header -->
+            <div class="q-section-header">
+                <div class="q-section-icon">
+                    <i class="fas fa-{{ section.icon }}"></i>
+                </div>
+                <div>
+                    <p class="q-section-label">Section {{ section_id }} sur {{ total_sections }}</p>
+                    <h1 class="q-section-title">{{ section.name }}</h1>
+                </div>
+            </div>
+
+            <!-- Form -->
+            <form method="POST" class="q-form" id="section-form">
+                {% for q in questions %}
+                <div class="q-field" id="field-{{ q.id }}">
+                    <label class="q-label">
+                        {{ q.text }}
+                        {% if not q.required %}
+                            <span class="q-optional">(optionnel)</span>
+                        {% endif %}
+                    </label>
+
+                    {% if q.warning %}
+                    <div class="q-warning">
+                        <i class="fas fa-triangle-exclamation"></i>
+                        {{ q.warning }}
+                    </div>
+                    {% endif %}
+
+                    {# ============ SINGLE CHOICE ============ #}
+                    {% if q.question_type.value == "single" %}
+                    <div class="q-options q-options-single">
+                        {% for opt in q.options %}
+                        <label class="q-option {% if current_answers.get(q.id) == opt %}selected{% endif %}">
+                            <input type="radio" name="{{ q.id }}" value="{{ opt }}"
+                                   {% if current_answers.get(q.id) == opt %}checked{% endif %}
+                                   {% if q.required %}required{% endif %}>
+                            <span class="q-option-check"></span>
+                            <span class="q-option-text">{{ opt }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+
+                    {# ============ MULTI CHOICE ============ #}
+                    {% elif q.question_type.value == "multi" %}
+                    <div class="q-options q-options-multi">
+                        {% for opt in q.options %}
+                        <label class="q-option {% if opt in (current_answers.get(q.id) or []) %}selected{% endif %}">
+                            <input type="checkbox" name="{{ q.id }}" value="{{ opt }}"
+                                   {% if opt in (current_answers.get(q.id) or []) %}checked{% endif %}>
+                            <span class="q-option-check q-option-check-box"></span>
+                            <span class="q-option-text">{{ opt }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+
+                    {# ============ NUMERIC ============ #}
+                    {% elif q.question_type.value == "numeric" %}
+                    <div class="q-input-wrap">
+                        <span class="q-input-prefix">$</span>
+                        <input type="number" name="{{ q.id }}" class="q-input"
+                               value="{{ current_answers.get(q.id, '') }}"
+                               min="0" step="1" placeholder="0"
+                               {% if q.required %}required{% endif %}>
+                        <span class="q-input-suffix">/mois</span>
+                    </div>
+
+                    {# ============ TEXT ============ #}
+                    {% elif q.question_type.value == "text" %}
+                    <textarea name="{{ q.id }}" class="q-textarea" rows="3"
+                              placeholder="Écrivez ici... (optionnel)">{{ current_answers.get(q.id, '') }}</textarea>
+
+                    {% endif %}
+                </div>
+                {% endfor %}
+
+                <!-- Navigation Buttons -->
+                <div class="q-actions">
+                    {% if section_id > 1 %}
+                    <a href="{{ url_for('questionnaire_section', section_id=section_id - 1) }}" class="btn btn-ghost">
+                        <i class="fas fa-arrow-left"></i> Retour
+                    </a>
+                    {% else %}
+                    <a href="{{ url_for('index') }}" class="btn btn-ghost">
+                        <i class="fas fa-house"></i> Accueil
+                    </a>
+                    {% endif %}
+
+                    <button type="submit" class="btn btn-primary btn-lg">
+                        {% if section_id < total_sections %}
+                            Continuer <i class="fas fa-arrow-right"></i>
+                        {% else %}
+                            Voir mes recommandations <i class="fas fa-wand-magic-sparkles"></i>
+                        {% endif %}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </main>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Options interactives: clic sur le label sélectionne/désélectionne
+document.querySelectorAll('.q-option').forEach(label => {
+    label.addEventListener('click', function() {
+        const input = this.querySelector('input');
+        if (input.type === 'radio') {
+            document.querySelectorAll(`input[name="${input.name}"]`).forEach(r => {
+                r.closest('.q-option').classList.remove('selected');
+            });
+            this.classList.add('selected');
+        } else if (input.type === 'checkbox') {
+            // Toggle handled by browser, just update visual
+            setTimeout(() => {
+                this.classList.toggle('selected', input.checked);
+            }, 0);
+        }
+    });
+});
+
+// Pré-sélectionner les options avec checked sur les radio
+document.querySelectorAll('input[type="radio"]:checked, input[type="checkbox"]:checked').forEach(input => {
+    input.closest('.q-option')?.classList.add('selected');
+});
+</script>
+{% endblock %}

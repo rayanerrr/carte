@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+
+{% block title %}Vos recommandations — CarteIdéale{% endblock %}
+
+{% block content %}
+<div class="results-page">
+
+    <!-- Header -->
+    <section class="results-header">
+        <div class="container">
+            <div class="results-header-content">
+                <div class="results-badge">
+                    <i class="fas fa-wand-magic-sparkles"></i>
+                    Analyse complète
+                </div>
+                <h1 class="results-title">Vos cartes idéales</h1>
+                <p class="results-subtitle">
+                    Basé sur votre profil, vos dépenses de
+                    <strong>${{ "%.0f"|format(total_monthly) }}/mois</strong>
+                    et vos habitudes d'achat.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <div class="container results-layout">
+
+        <!-- Sommaire du profil -->
+        <aside class="results-sidebar">
+            <div class="profile-card">
+                <h3 class="profile-card-title">
+                    <i class="fas fa-user-circle"></i> Votre profil
+                </h3>
+                {% if profile.province %}
+                <div class="profile-item">
+                    <span class="profile-label">Province</span>
+                    <span class="profile-value">{{ profile.province }}</span>
+                </div>
+                {% endif %}
+                {% if profile.income_personal and profile.income_personal != "Préfère ne pas répondre" %}
+                <div class="profile-item">
+                    <span class="profile-label">Revenu</span>
+                    <span class="profile-value">{{ profile.income_personal }}</span>
+                </div>
+                {% endif %}
+                {% if profile.credit_score and profile.credit_score != "Préfère ne pas répondre" %}
+                <div class="profile-item">
+                    <span class="profile-label">Score crédit</span>
+                    <span class="profile-value">{{ profile.credit_score }}</span>
+                </div>
+                {% endif %}
+                {% if profile.max_annual_fee %}
+                <div class="profile-item">
+                    <span class="profile-label">Frais max</span>
+                    <span class="profile-value">{{ profile.max_annual_fee }}</span>
+                </div>
+                {% endif %}
+
+                <h4 class="profile-spending-title">Dépenses mensuelles</h4>
+                {% for cat, amount in spending.items() %}
+                {% if amount > 0 %}
+                <div class="spending-bar-item">
+                    <span class="spending-label">{{ cat }}</span>
+                    <div class="spending-bar-wrap">
+                        <div class="spending-bar" style="width: {{ [((amount / [total_monthly, 1]|max) * 100)|int, 100]|min }}%"></div>
+                    </div>
+                    <span class="spending-amount">${{ "%.0f"|format(amount) }}</span>
+                </div>
+                {% endif %}
+                {% endfor %}
+                <div class="spending-total">
+                    Total: <strong>${{ "%.0f"|format(total_monthly) }}/mois</strong>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Recommandations -->
+        <section class="results-main">
+            {% if not recommendations %}
+            <div class="no-results">
+                <i class="fas fa-search fa-3x"></i>
+                <h3>Aucune carte trouvée</h3>
+                <p>Vos critères sont peut-être trop restrictifs. Essayez d'assouplir vos filtres.</p>
+                <a href="{{ url_for('questionnaire_start') }}" class="btn btn-primary">Refaire le questionnaire</a>
+            </div>
+            {% else %}
+            <div class="results-intro">
+                <p>{{ recommendations|length }} cartes recommandées, classées par score global.</p>
+            </div>
+
+            {% for rec in recommendations %}
+            <article class="rec-card {% if loop.first %}rec-card-top{% endif %}">
+
+                <!-- Rang & Badge -->
+                <div class="rec-rank">
+                    {% if loop.index == 1 %}
+                    <div class="rank-badge rank-gold">
+                        <i class="fas fa-trophy"></i> #1 Meilleur choix
+                    </div>
+                    {% elif loop.index == 2 %}
+                    <div class="rank-badge rank-silver">
+                        <i class="fas fa-medal"></i> #2
+                    </div>
+                    {% elif loop.index == 3 %}
+                    <div class="rank-badge rank-bronze">
+                        <i class="fas fa-award"></i> #3
+                    </div>
+                    {% else %}
+                    <div class="rank-badge rank-neutral">#{{ loop.index }}</div>
+                    {% endif %}
+                </div>
+
+                <!-- Infos carte -->
+                <div class="rec-header">
+                    <div class="rec-card-info">
+                        <h2 class="rec-card-name">{{ rec.card.name }}</h2>
+                        <div class="rec-card-meta">
+                            <span class="meta-badge meta-issuer">{{ rec.card.issuer }}</span>
+                            <span class="meta-badge meta-network meta-{{ rec.card.network.value|lower|replace(' ', '-') }}">
+                                {{ rec.card.network.value }}
+                            </span>
+                            {% if rec.card.annual_fee == 0 %}
+                            <span class="meta-badge meta-free">Sans frais</span>
+                            {% endif %}
+                            {% if rec.card.first_year_free %}
+                            <span class="meta-badge meta-first-year">1re année gratuite</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="rec-scores">
+                        <div class="score-item">
+                            <span class="score-value score-roi">+{{ rec.annual_roi|int }}$</span>
+                            <span class="score-label">ROI annuel</span>
+                        </div>
+                        <div class="score-item">
+                            <span class="score-value score-match">{{ rec.match_percentage }}%</span>
+                            <span class="score-label">Compatibilité</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Détails financiers -->
+                <div class="rec-details">
+                    <div class="rec-detail-item">
+                        <i class="fas fa-dollar-sign"></i>
+                        <span>Frais annuels: <strong>{{ rec.card.annual_fee }}$</strong></span>
+                    </div>
+                    <div class="rec-detail-item">
+                        <i class="fas fa-percent"></i>
+                        <span>Taux de base: <strong>{{ rec.card.base_rate }}%</strong></span>
+                    </div>
+                    {% if rec.card.reward_program and rec.card.reward_program != "None" %}
+                    <div class="rec-detail-item">
+                        <i class="fas fa-gift"></i>
+                        <span>Programme: <strong>{{ rec.card.reward_program }}</strong></span>
+                    </div>
+                    {% endif %}
+                    {% if rec.card.welcome_bonus > 0 %}
+                    <div class="rec-detail-item">
+                        <i class="fas fa-star"></i>
+                        <span>Bonus bienvenue: <strong>~{{ rec.card.welcome_bonus|int }}$</strong></span>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Raisons, avertissements, avantages déjà possédés -->
+                <div class="rec-reasons-wrap">
+                    {% if rec.reasons %}
+                    <div class="rec-reasons">
+                        <h4><i class="fas fa-circle-check"></i> Pourquoi cette carte vous convient</h4>
+                        <ul>
+                            {% for reason in rec.reasons %}
+                            <li>{{ reason }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+
+                    {% if rec.warnings %}
+                    <div class="rec-warnings">
+                        <h4><i class="fas fa-triangle-exclamation"></i> Points d'attention</h4>
+                        <ul>
+                            {% for warning in rec.warnings %}
+                            <li>{{ warning }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+
+                    {% if rec.already_has_benefits %}
+                    <div class="rec-overlap">
+                        <h4><i class="fas fa-info-circle"></i> Avantages déjà possédés</h4>
+                        <ul>
+                            {% for benefit in rec.already_has_benefits %}
+                            <li>{{ benefit }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Couvertures assurance & voyage -->
+                <div class="rec-perks">
+                    {% if rec.card.insurance.travel_medical %}
+                    <span class="perk-tag"><i class="fas fa-heart-pulse"></i> Assurance médicale voyage</span>
+                    {% endif %}
+                    {% if rec.card.insurance.travel_cancellation %}
+                    <span class="perk-tag"><i class="fas fa-plane-slash"></i> Annulation voyage</span>
+                    {% endif %}
+                    {% if rec.card.insurance.car_rental %}
+                    <span class="perk-tag"><i class="fas fa-car"></i> Location de voiture</span>
+                    {% endif %}
+                    {% if rec.card.insurance.mobile_device %}
+                    <span class="perk-tag"><i class="fas fa-mobile"></i> Assurance mobile</span>
+                    {% endif %}
+                    {% if rec.card.insurance.purchase_protection %}
+                    <span class="perk-tag"><i class="fas fa-shield-halved"></i> Protection achats</span>
+                    {% endif %}
+                    {% if rec.card.insurance.extended_warranty %}
+                    <span class="perk-tag"><i class="fas fa-certificate"></i> Garantie prolongée</span>
+                    {% endif %}
+                    {% if rec.card.travel_perks.lounge_access %}
+                    <span class="perk-tag perk-premium"><i class="fas fa-couch"></i>
+                        Salons aéroport
+                        {% if rec.card.travel_perks.lounge_visits_per_year and rec.card.travel_perks.lounge_visits_per_year < 100 %}
+                            ({{ rec.card.travel_perks.lounge_visits_per_year }}/an)
+                        {% else %}
+                            (illimité)
+                        {% endif %}
+                    </span>
+                    {% endif %}
+                    {% if rec.card.travel_perks.nexus_credit %}
+                    <span class="perk-tag perk-premium"><i class="fas fa-passport"></i> Crédit NEXUS</span>
+                    {% endif %}
+                    {% if rec.card.travel_perks.first_bag_free %}
+                    <span class="perk-tag"><i class="fas fa-suitcase"></i> 1er bagage gratuit</span>
+                    {% endif %}
+                </div>
+
+            </article>
+            {% endfor %}
+
+            <!-- CTA - Recommencer -->
+            <div class="results-cta">
+                <p>Pas satisfait des résultats?</p>
+                <a href="{{ url_for('questionnaire_start') }}" class="btn btn-ghost">
+                    <i class="fas fa-rotate-left"></i> Refaire le questionnaire
+                </a>
+                <a href="{{ url_for('all_cards') }}" class="btn btn-secondary">
+                    <i class="fas fa-th-list"></i> Voir toutes les cartes
+                </a>
+            </div>
+
+            {% endif %}
+        </section>
+
+    </div>
+</div>
+{% endblock %}
