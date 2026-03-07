@@ -159,7 +159,13 @@ class RecommendationEngine:
         - Contrainte Loblaws/Amex (épicerie = 1x max)
         """
 
-        spending = self._get_spending_dict_no_alias()
+        spending = dict(self._get_spending_dict_no_alias())
+
+        # Ajout des dépenses publicitaires (Google Ads / Meta Ads) aux dépenses business
+        if self.profile.ad_spending == "Oui, plus de 1 000 $/mois":
+            spending["business"] = spending.get("business", 0) + 1200
+        elif self.profile.ad_spending == "Oui, moins de 1 000 $/mois":
+            spending["business"] = spending.get("business", 0) + 400
 
         # A. Valeur des récompenses avec CPP dynamique
         rewards_value = self._calculate_rewards_value_dynamic(card, spending)
@@ -310,6 +316,13 @@ class RecommendationEngine:
         else:
             amort = 0.50   # Long terme : amorti sur 2-3 ans
 
+        # Ajustement selon l'horizon de demande (timeline)
+        timeline = self.profile.timeline
+        if timeline == "Je planifie seulement pour l'instant":
+            amort *= 0.85  # Planification future : les offres changent, bonus moins tangible
+        elif timeline == "Immédiatement":
+            amort = min(1.0, amort * 1.05)  # Demande immédiate : bonus pleinement réalisable
+
         return card.welcome_bonus * amort * eligibility
 
     def _calculate_petro_canada_synergy(self, card: CreditCard) -> float:
@@ -424,9 +437,10 @@ class RecommendationEngine:
             if self.profile.device_insurance == "Non":
                 value += 100
 
-        # E. Location de voiture
+        # E. Location de voiture (valeur augmentée si pas de véhicule personnel)
         if insurance.car_rental and self.profile.car_rental in ["Oui, à chaque voyage", "Oui, parfois"]:
-            value += 50
+            car_rental_base = 80 if self.profile.has_vehicle == "Non" else 50
+            value += car_rental_base
 
         return value
 
@@ -726,6 +740,54 @@ class RecommendationEngine:
         elif simplicity in ["Je suis un(e) expert(e) en points — j'optimise au maximum"]:
             weights['points_program_quality'] += 1.5
             weights['reward_type_fit'] += 0.5
+
+        # === AJUSTEMENTS selon budget voyage déclaré ===
+        travel_budget = self.profile.travel_budget
+        if travel_budget in ["10 000–19 999 $", "20 000 $ et plus"]:
+            weights['travel_perks'] += 2.0
+            weights['insurance_coverage'] += 1.0
+        elif travel_budget == "5 000–9 999 $":
+            weights['travel_perks'] += 1.0
+
+        # === AJUSTEMENTS selon préférence de récompenses voyage ===
+        reward_pref = self.profile.reward_preference
+        if reward_pref:
+            if "transférables" in reward_pref or "transferables" in reward_pref:
+                weights['points_program_quality'] += 2.0
+                weights['travel_perks'] += 0.5
+            elif "remise directe" in reward_pref or "cashback voyage" in reward_pref.lower():
+                weights['reward_type_fit'] += 1.0
+            elif "pas intéressé" in reward_pref or "pas interesse" in reward_pref:
+                weights['travel_perks'] = max(0.2, weights['travel_perks'] - 1.0)
+                weights['points_program_quality'] = max(0.5, weights['points_program_quality'] - 0.5)
+
+        # === AJUSTEMENTS selon fréquence de livraison de repas ===
+        food_del = self.profile.food_delivery
+        if food_del in ["1–2 fois par semaine", "Presque tous les jours"]:
+            weights['rewards_earning'] += 1.0  # Dépenses resto élevées = earning compte
+
+        # === AJUSTEMENTS selon statut de propriétaire ===
+        if self.profile.home_owner == "Propriétaire":
+            weights['insurance_coverage'] += 0.5  # Protège des biens de plus grande valeur
+
+        # === AJUSTEMENTS si pas de véhicule ===
+        if self.profile.has_vehicle == "Non":
+            weights['insurance_coverage'] += 0.5  # Assurance location voiture = précieuse
+
+        # === AJUSTEMENTS pour premier cardholder ===
+        if not self.profile.has_cards:
+            weights['eligibility'] += 1.0    # Critique d'obtenir une carte accessible
+            weights['fee_value'] += 0.5      # Cartes sans frais préférables en début
+
+        # === AJUSTEMENTS selon type d'établissement scolaire ===
+        school = self.profile.school_type
+        if school in ["Oui, université", "Oui, CEGEP", "Oui, collège ou école technique"]:
+            weights['fee_value'] += 1.0      # Étudiants préfèrent les cartes sans frais
+            weights['eligibility'] += 0.5
+
+        # === AJUSTEMENTS selon dépenses publicitaires (travailleur autonome) ===
+        if self.profile.ad_spending == "Oui, plus de 1 000 $/mois":
+            weights['rewards_earning'] += 1.5   # Très hautes dépenses business = maximiser gains
 
         # === POIDS du taux d'intérêt selon comportement de paiement ===
         payment = self.profile.pays_balance_full
@@ -1078,7 +1140,19 @@ class RecommendationEngine:
         if max_score == 0:
             return 0.50   # Neutre si aucun critere pertinent
 
-        return min(1.0, score / max_score)
+        result = min(1.0, score / max_score)
+
+        # Bonus propriétaire : protection des achats / garantie prolongée plus précieuse
+        if self.profile.home_owner == "Propriétaire":
+            if card.insurance.extended_warranty or card.insurance.purchase_protection:
+                result = min(1.0, result * 1.08)
+
+        # Bonus sans véhicule : assurance location voiture = nécessité réelle
+        if self.profile.has_vehicle == "Non" and travels:
+            if card.insurance.car_rental:
+                result = min(1.0, result * 1.06)
+
+        return result
 
     def _score_travel_perks(self, card: CreditCard) -> float:
         """
@@ -1093,6 +1167,18 @@ class RecommendationEngine:
         trips = self._estimate_trips_from_frequency()
         score = 0.0
         max_score = 0.0
+
+        # Pré-calcul : budget voyage et préférence de programme
+        travel_budget = self.profile.travel_budget
+        budget_bonus = 0.0
+        if travel_budget == "20 000 $ et plus":
+            budget_bonus = 0.12
+        elif travel_budget == "10 000–19 999 $":
+            budget_bonus = 0.08
+        elif travel_budget == "5 000–9 999 $":
+            budget_bonus = 0.04
+
+        reward_pref = self.profile.reward_preference
 
         # --- Acces aux salons ---
         max_score += 0.35
@@ -1180,7 +1266,25 @@ class RecommendationEngine:
         if max_score == 0:
             return 0.50
 
-        return min(1.0, score / max_score)
+        result = min(1.0, score / max_score)
+
+        # Bonus budget voyage : gros budget justifie les avantages premium
+        result = min(1.0, result + budget_bonus * result)
+
+        # Bonus préférence programme de récompenses voyage
+        if reward_pref:
+            prog = (card.reward_program or "").lower()
+            if "transférables" in reward_pref or "transferables" in reward_pref:
+                transferable = ["mr points", "aeroplan", "aéroplan", "avion"]
+                if any(t in prog for t in transferable):
+                    result = min(1.0, result + 0.08)
+            elif "remise directe" in reward_pref or "cashback voyage" in reward_pref.lower():
+                if "scene+" in prog or "westjet" in prog:
+                    result = min(1.0, result + 0.06)
+            elif "pas intéressé" in reward_pref or "pas interesse" in reward_pref:
+                result *= 0.80  # Ne veut pas de récompenses voyage : avantages voyage moins utiles
+
+        return result
 
     def _score_network_store_fit(self, card: CreditCard) -> float:
         """
@@ -1273,6 +1377,32 @@ class RecommendationEngine:
             if card.network == CardNetwork.AMEX:
                 score = min(1.0, score + 0.10)   # Presale Amex = avantage reel
 
+        # --- Destinations de voyage (frais FX sur achat international) ---
+        travel_dest = self.profile.travel_destinations
+        if travel_dest in ["En Europe principalement", "En Asie principalement",
+                           "Partout dans le monde", "Aux États-Unis principalement"]:
+            if card.no_fx_fee:
+                score = min(1.0, score + 0.12)  # Pas de frais FX = avantage majeur
+            elif travel_dest in ["En Europe principalement", "En Asie principalement",
+                                 "Partout dans le monde"]:
+                score -= 0.08  # FX 2.5% sur voyages hors Amérique du Nord = pénalité
+
+        # --- Amazon Prime : achats Amazon fréquents ---
+        if self.profile.amazon_prime == "Oui":
+            if "amazon" in card.name.lower():
+                score = min(1.0, score + 0.10)  # Carte Amazon = match parfait pour membre Prime
+            elif card.get_reward_rate("online") >= 3.0:
+                score = min(1.0, score + 0.05)  # Bon taux online = 2e meilleur choix
+
+        # --- Walmart : atténue la pénalité Amex si épiceries incompatibles ---
+        if self.profile.uses_walmart in ["Oui, régulièrement", "Oui, occasionnellement"]:
+            if card.network == CardNetwork.AMEX:
+                grocery_lower = [s.lower() for s in self.profile.grocery_stores]
+                loblaws_stores = ["maxi", "provigo", "loblaws", "real canadian superstore"]
+                has_incompatible = any(any(l in g for l in loblaws_stores) for g in grocery_lower)
+                if has_incompatible:
+                    score = min(1.0, score + 0.08)  # Walmart accepte Amex → compense partiellement
+
         return max(0.0, min(1.0, score))
 
     def _score_points_quality(self, card: CreditCard) -> float:
@@ -1355,6 +1485,24 @@ class RecommendationEngine:
         # Penalite si refuse recemment
         if self.profile.denied_recently == "Oui":
             credit_score *= 0.60
+
+        # Ajustement premier cardholder (sans historique de carte de crédit)
+        if not self.profile.has_cards:
+            if card.annual_fee == 0 or card.tier == CardTier.STUDENT:
+                credit_score = min(1.0, credit_score * 1.10)  # Cartes accessibles = meilleure chance
+            elif card.annual_fee > 150:
+                credit_score = max(0.0, credit_score * 0.90)  # Premium risqué sans historique
+
+        # Ajustement selon le nombre de cartes actuelles (crédit établi)
+        num_str = str(self.profile.num_cards)
+        if num_str == "5 et plus" or (isinstance(self.profile.num_cards, int) and self.profile.num_cards >= 5):
+            credit_score = min(1.0, credit_score * 1.05)  # Nombreuses cartes = crédit établi
+
+        # Ajustement étudiant confirmé (établissement scolaire déclaré)
+        school = self.profile.school_type
+        if school in ["Oui, université", "Oui, CEGEP", "Oui, collège ou école technique"]:
+            if card.tier == CardTier.STUDENT or card.annual_fee == 0:
+                credit_score = min(1.0, credit_score * 1.10)  # Carte étudiant/sans frais = accessible
 
         # Ponderee : revenu 40%, credit 60%
         return income_score * 0.40 + credit_score * 0.60
@@ -1536,6 +1684,36 @@ class RecommendationEngine:
             province = self.profile.province
             if province and province not in ["Québec", "Quebec", "Ontario", ""]:
                 multiplier *= 0.60   # Desjardins = tres difficile hors QC/ON
+
+        # 16b. DÉPENSES PUBLICITAIRES ÉLEVÉES + carte non-business
+        if self.profile.ad_spending == "Oui, plus de 1 000 $/mois":
+            if card.tier != CardTier.BUSINESS:
+                multiplier *= 0.90  # Légère pénalité : carte business serait plus optimale fiscalement
+
+        # 17. MUST-HAVE FEATURE — critères non-négociables (analyse par mots-clés)
+        must_have = (self.profile.must_have_feature or "").lower().strip()
+        if must_have:
+            kw_lounge = any(kw in must_have for kw in ["lounge", "salon"])
+            kw_cashback = any(kw in must_have for kw in ["cashback", "cash back", "remboursement", "remise"])
+            kw_aeroplan = any(kw in must_have for kw in ["aeroplan", "aéroplan"])
+            kw_nofee = any(kw in must_have for kw in ["sans frais", "no fee", "gratuit", "frais 0"])
+            kw_nexus = "nexus" in must_have
+
+            if kw_lounge and not card.travel_perks.lounge_access:
+                multiplier *= 0.35   # Critique : lounge demandé, carte sans lounge
+            if kw_cashback:
+                prog = (card.reward_program or "").lower()
+                if card.tier not in [CardTier.CASHBACK, CardTier.NO_FEE] and \
+                   "cashback" not in prog and "cash back" not in prog:
+                    multiplier *= 0.55
+            if kw_aeroplan:
+                prog = (card.reward_program or "").lower()
+                if "aeroplan" not in prog and "aéroplan" not in prog:
+                    multiplier *= 0.45
+            if kw_nofee and card.annual_fee > 0:
+                multiplier *= 0.25   # Critique : veut absolument sans frais annuels
+            if kw_nexus and not card.travel_perks.nexus_credit:
+                multiplier *= 0.60
 
         # 16. PREFERENCE BANCAIRE — le facteur manquant
         open_to_bank = self.profile.open_to_new_bank
@@ -1854,7 +2032,7 @@ class RecommendationEngine:
 
     def _get_spending_dict_no_alias(self) -> Dict[str, float]:
         """Dépenses sans alias (pour éviter double-comptage dans le ROI)."""
-        return {
+        d = {
             "groceries":     self.profile.spending_groceries,
             "gas":           self.profile.spending_gas,
             "restaurants":   self.profile.spending_restaurants,
@@ -1868,6 +2046,28 @@ class RecommendationEngine:
             "healthcare":    self.profile.spending_healthcare,
             "business":      self.profile.spending_business,
         }
+        # Dépenses non-allouées : si total_monthly déclaré > somme des postes détaillés,
+        # le surplus est comptabilisé au taux de base (dépenses générales non-catégorisées)
+        declared_total = self._parse_total_monthly()
+        item_total = sum(v for v in d.values() if v > 0)
+        unallocated = max(0.0, declared_total - item_total)
+        if unallocated > 20:
+            d["misc"] = unallocated
+        return d
+
+    def _parse_total_monthly(self) -> float:
+        """Parse le budget mensuel total déclaré en valeur numérique."""
+        mapping = {
+            "Moins de 500 $": 400.0,
+            "500–999 $": 750.0,
+            "1 000–1 999 $": 1500.0,
+            "2 000–2 999 $": 2500.0,
+            "3 000–4 999 $": 4000.0,
+            "5 000–7 499 $": 6000.0,
+            "7 500–9 999 $": 8500.0,
+            "10 000 $ et plus": 12000.0,
+        }
+        return mapping.get(self.profile.total_monthly, 0.0)
 
     def _parse_credit_score(self) -> int:
         """Parse le score de crédit en valeur numérique"""
