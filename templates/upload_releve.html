@@ -1,0 +1,620 @@
+{% extends "base.html" %}
+
+{% block title %}Analyser mes relevés — CarteIdéale{% endblock %}
+
+{% block extra_head %}
+<style>
+.releve-hero {
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    padding: 4rem 0 3rem;
+    text-align: center;
+}
+.releve-hero h1 {
+    font-size: 2.25rem;
+    font-weight: 800;
+    color: #fff;
+    margin-bottom: 0.75rem;
+}
+.releve-hero p {
+    color: #94a3b8;
+    font-size: 1.1rem;
+    max-width: 600px;
+    margin: 0 auto;
+}
+.releve-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(99, 102, 241, 0.15);
+    border: 1px solid rgba(99, 102, 241, 0.4);
+    color: #a5b4fc;
+    padding: 0.35rem 1rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 1.25rem;
+}
+.releve-badge i { color: #818cf8; }
+
+.releve-section {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 5rem;
+}
+
+/* Upload zone */
+.upload-card {
+    background: #1e293b;
+    border: 2px dashed #334155;
+    border-radius: 16px;
+    padding: 3rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    position: relative;
+}
+.upload-card:hover, .upload-card.drag-over {
+    border-color: #6366f1;
+    background: rgba(99, 102, 241, 0.06);
+}
+.upload-icon {
+    width: 72px;
+    height: 72px;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 1.25rem;
+    font-size: 1.75rem;
+    color: #fff;
+}
+.upload-card h3 {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #f1f5f9;
+    margin-bottom: 0.5rem;
+}
+.upload-card p {
+    color: #64748b;
+    font-size: 0.9rem;
+    margin-bottom: 1.5rem;
+}
+.upload-formats {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 1.5rem;
+}
+.format-chip {
+    background: #0f172a;
+    border: 1px solid #334155;
+    color: #94a3b8;
+    padding: 0.25rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 500;
+}
+#file-input { display: none; }
+.file-list {
+    margin-top: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    text-align: left;
+}
+.file-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 0.6rem 1rem;
+    font-size: 0.875rem;
+    color: #cbd5e1;
+}
+.file-item i { color: #6366f1; }
+.file-item .file-size { margin-left: auto; color: #475569; font-size: 0.78rem; }
+
+.btn-upload {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    color: #fff;
+    border: none;
+    padding: 0.9rem 2.5rem;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    transition: opacity 0.2s, transform 0.1s;
+    width: 100%;
+    justify-content: center;
+    margin-top: 1.5rem;
+}
+.btn-upload:hover { opacity: 0.9; transform: translateY(-1px); }
+.btn-upload:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* Tips */
+.tips-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-top: 2rem;
+}
+.tip-card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 1.25rem 1rem;
+    text-align: center;
+}
+.tip-icon {
+    font-size: 1.5rem;
+    color: #6366f1;
+    margin-bottom: 0.5rem;
+}
+.tip-card h4 {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #e2e8f0;
+    margin-bottom: 0.35rem;
+}
+.tip-card p {
+    font-size: 0.78rem;
+    color: #64748b;
+    line-height: 1.5;
+}
+
+/* Loading */
+.loading-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    z-index: 999;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 1.25rem;
+    text-align: center;
+}
+.loading-overlay.active { display: flex; }
+.spinner {
+    width: 56px;
+    height: 56px;
+    border: 4px solid rgba(99,102,241,0.2);
+    border-top-color: #6366f1;
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text {
+    color: #e2e8f0;
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+.loading-sub {
+    color: #64748b;
+    font-size: 0.85rem;
+}
+
+/* Error */
+.alert-error {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+    padding: 1rem 1.25rem;
+    border-radius: 10px;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    font-size: 0.9rem;
+}
+
+/* Results */
+.results-card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 16px;
+    overflow: hidden;
+    margin-bottom: 1.5rem;
+}
+.results-header {
+    background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15));
+    border-bottom: 1px solid #334155;
+    padding: 1.5rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+.results-header-icon {
+    width: 48px;
+    height: 48px;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 1.2rem;
+    flex-shrink: 0;
+}
+.results-header h2 {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #f1f5f9;
+    margin-bottom: 0.2rem;
+}
+.results-header p {
+    font-size: 0.85rem;
+    color: #64748b;
+}
+.results-body { padding: 1.5rem 2rem; }
+
+.spending-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+}
+.spending-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    padding: 0.7rem 1rem;
+}
+.spending-label {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.85rem;
+    color: #94a3b8;
+}
+.spending-label i { width: 16px; text-align: center; color: #6366f1; }
+.spending-value {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #e2e8f0;
+}
+.spending-value.zero { color: #334155; }
+
+.total-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(99,102,241,0.1);
+    border: 1px solid rgba(99,102,241,0.25);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+}
+.total-row .label {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #a5b4fc;
+}
+.total-row .amount {
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: #818cf8;
+}
+
+.detected-section {
+    margin-top: 1.25rem;
+}
+.detected-section h4 {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.75rem;
+}
+.chips-row {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.chip {
+    background: #0f172a;
+    border: 1px solid #334155;
+    color: #94a3b8;
+    padding: 0.3rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+.chip.positive {
+    background: rgba(34,197,94,0.08);
+    border-color: rgba(34,197,94,0.3);
+    color: #86efac;
+}
+
+.notes-box {
+    background: rgba(234,179,8,0.06);
+    border: 1px solid rgba(234,179,8,0.25);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    font-size: 0.82rem;
+    color: #fde68a;
+    margin-top: 1.25rem;
+    display: flex;
+    gap: 0.6rem;
+    align-items: flex-start;
+    line-height: 1.5;
+}
+
+.btn-continue {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    color: #fff;
+    text-decoration: none;
+    padding: 1rem 2rem;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    transition: opacity 0.2s, transform 0.1s;
+    width: 100%;
+    margin-top: 1.25rem;
+}
+.btn-continue:hover { opacity: 0.9; transform: translateY(-1px); }
+.btn-restart {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    color: #64748b;
+    font-size: 0.85rem;
+    text-decoration: none;
+    margin-top: 0.75rem;
+    padding: 0.5rem;
+    border-radius: 8px;
+    transition: color 0.2s;
+}
+.btn-restart:hover { color: #94a3b8; }
+
+@media (max-width: 600px) {
+    .tips-grid { grid-template-columns: 1fr; }
+    .spending-grid { grid-template-columns: 1fr; }
+    .releve-hero h1 { font-size: 1.75rem; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Loading overlay -->
+<div class="loading-overlay" id="loading-overlay">
+    <div class="spinner"></div>
+    <div class="loading-text">Claude analyse vos relevés...</div>
+    <div class="loading-sub">Extraction des dépenses par catégorie — environ 20–40 secondes</div>
+</div>
+
+<!-- Hero -->
+<section class="releve-hero">
+    <div class="releve-badge">
+        <i class="fas fa-sparkles"></i>
+        Propulsé par Claude Opus
+    </div>
+    <h1>Analyse automatique de vos relevés</h1>
+    <p>Téléversez vos relevés de carte de crédit. Claude extrait automatiquement vos dépenses — pas besoin de remplir les sections manuellement.</p>
+</section>
+
+<div class="releve-section">
+
+    {% if error %}
+    <div class="alert-error">
+        <i class="fas fa-circle-exclamation"></i>
+        <span>{{ error }}</span>
+    </div>
+    {% endif %}
+
+    {% if success and result %}
+    <!-- Résultats -->
+    <div class="results-card">
+        <div class="results-header">
+            <div class="results-header-icon"><i class="fas fa-check"></i></div>
+            <div>
+                <h2>Analyse terminée</h2>
+                <p>
+                    {% if result.months_analyzed %}{{ result.months_analyzed }} mois analysé{% if result.months_analyzed > 1 %}s{% endif %} · {% endif %}
+                    Moyennes mensuelles extraites
+                </p>
+            </div>
+        </div>
+        <div class="results-body">
+
+            <div class="total-row">
+                <span class="label"><i class="fas fa-wallet" style="margin-right:0.5rem;"></i>Total mensuel détecté</span>
+                <span class="amount">{{ total_spending }} $</span>
+            </div>
+
+            <div class="spending-grid">
+                {% set categories = [
+                    ("spending_groceries",    "fa-basket-shopping",  "Épicerie"),
+                    ("spending_gas",          "fa-gas-pump",         "Essence"),
+                    ("spending_restaurants",  "fa-utensils",         "Restaurants"),
+                    ("spending_pharmacy",     "fa-pills",            "Pharmacie"),
+                    ("spending_transport",    "fa-bus",              "Transport"),
+                    ("spending_subscriptions","fa-wifi",             "Abonnements"),
+                    ("spending_entertainment","fa-ticket",           "Divertissement"),
+                    ("spending_online",       "fa-bag-shopping",     "Achats en ligne"),
+                    ("spending_foreign",      "fa-globe",            "Devises étrangères"),
+                ] %}
+                {% for key, icon, label in categories %}
+                {% set val = result.get(key, 0) or 0 %}
+                <div class="spending-item">
+                    <span class="spending-label">
+                        <i class="fas {{ icon }}"></i>{{ label }}
+                    </span>
+                    <span class="spending-value {% if val == 0 %}zero{% endif %}">
+                        {{ val | int }} $
+                    </span>
+                </div>
+                {% endfor %}
+            </div>
+
+            {% set has_extras = result.grocery_stores or result.gas_stations or result.telecom_services or result.uses_costco or result.uses_walmart or result.amazon_usage %}
+            {% if has_extras %}
+            <div class="detected-section">
+                <h4>Commerces et habitudes détectés</h4>
+                <div class="chips-row">
+                    {% for store in (result.grocery_stores or []) %}
+                    <span class="chip positive"><i class="fas fa-store" style="margin-right:0.3rem;font-size:0.72rem;"></i>{{ store }}</span>
+                    {% endfor %}
+                    {% for station in (result.gas_stations or []) %}
+                    <span class="chip positive"><i class="fas fa-gas-pump" style="margin-right:0.3rem;font-size:0.72rem;"></i>{{ station }}</span>
+                    {% endfor %}
+                    {% for tel in (result.telecom_services or []) %}
+                    <span class="chip positive"><i class="fas fa-mobile" style="margin-right:0.3rem;font-size:0.72rem;"></i>{{ tel }}</span>
+                    {% endfor %}
+                    {% if result.uses_costco and result.uses_costco != "Jamais" %}
+                    <span class="chip">Costco : {{ result.uses_costco }}</span>
+                    {% endif %}
+                    {% if result.uses_walmart and result.uses_walmart != "Jamais" %}
+                    <span class="chip">Walmart : {{ result.uses_walmart }}</span>
+                    {% endif %}
+                    {% if result.amazon_usage and result.amazon_usage != "Jamais" %}
+                    <span class="chip">Amazon</span>
+                    {% endif %}
+                    {% if result.amazon_prime %}
+                    <span class="chip positive">Prime</span>
+                    {% endif %}
+                    {% if result.food_delivery and result.food_delivery != "Rarement" %}
+                    <span class="chip">Livraison repas : {{ result.food_delivery }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if result.notes %}
+            <div class="notes-box">
+                <i class="fas fa-circle-info" style="flex-shrink:0;margin-top:0.1rem;"></i>
+                <span>{{ result.notes }}</span>
+            </div>
+            {% endif %}
+
+            <a href="{{ url_for('questionnaire_start') }}" class="btn-continue">
+                <i class="fas fa-arrow-right"></i>
+                Continuer le questionnaire (profil, voyages, préférences...)
+            </a>
+            <a href="{{ url_for('analyser_releves') }}" class="btn-restart">
+                <i class="fas fa-rotate-left"></i>
+                Recommencer avec d'autres relevés
+            </a>
+        </div>
+    </div>
+
+    {% else %}
+    <!-- Formulaire d'upload -->
+    <form method="POST" enctype="multipart/form-data" id="upload-form">
+        <div class="upload-card" id="drop-zone">
+            <div class="upload-icon"><i class="fas fa-file-arrow-up"></i></div>
+            <h3>Glissez vos relevés ici</h3>
+            <p>ou cliquez pour sélectionner des fichiers</p>
+            <div class="upload-formats">
+                <span class="format-chip"><i class="fas fa-file-pdf" style="margin-right:0.3rem;color:#ef4444;"></i>PDF</span>
+                <span class="format-chip"><i class="fas fa-image" style="margin-right:0.3rem;color:#3b82f6;"></i>PNG / JPG</span>
+                <span class="format-chip"><i class="fas fa-file-lines" style="margin-right:0.3rem;color:#6366f1;"></i>Texte</span>
+            </div>
+            <input type="file" id="file-input" name="releves" multiple accept=".pdf,.png,.jpg,.jpeg,.txt">
+            <div class="file-list" id="file-list"></div>
+        </div>
+        <button type="submit" class="btn-upload" id="submit-btn" disabled>
+            <i class="fas fa-wand-magic-sparkles"></i>
+            Analyser avec Claude
+        </button>
+    </form>
+
+    <div class="tips-grid">
+        <div class="tip-card">
+            <div class="tip-icon"><i class="fas fa-calendar-days"></i></div>
+            <h4>Plus de relevés = meilleur résultat</h4>
+            <p>Idéalement 3 à 6 mois pour des moyennes représentatives.</p>
+        </div>
+        <div class="tip-card">
+            <div class="tip-icon"><i class="fas fa-shield-halved"></i></div>
+            <h4>Données confidentielles</h4>
+            <p>Les fichiers sont analysés puis immédiatement supprimés. Aucune donnée n'est conservée.</p>
+        </div>
+        <div class="tip-card">
+            <div class="tip-icon"><i class="fas fa-pencil"></i></div>
+            <h4>Modifiable ensuite</h4>
+            <p>Les montants pré-remplis peuvent être ajustés dans le questionnaire.</p>
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const fileList = document.getElementById('file-list');
+const submitBtn = document.getElementById('submit-btn');
+const form = document.getElementById('upload-form');
+const overlay = document.getElementById('loading-overlay');
+
+if (dropZone) {
+    dropZone.addEventListener('click', () => fileInput && fileInput.click());
+
+    dropZone.addEventListener('dragover', e => {
+        e.preventDefault();
+        dropZone.classList.add('drag-over');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        if (fileInput) {
+            const dt = new DataTransfer();
+            [...(fileInput.files || [])].forEach(f => dt.items.add(f));
+            [...e.dataTransfer.files].forEach(f => dt.items.add(f));
+            fileInput.files = dt.files;
+            updateFileList();
+        }
+    });
+}
+
+if (fileInput) {
+    fileInput.addEventListener('change', updateFileList);
+}
+
+function updateFileList() {
+    if (!fileList || !fileInput) return;
+    fileList.innerHTML = '';
+    const files = [...fileInput.files];
+    files.forEach(f => {
+        const div = document.createElement('div');
+        div.className = 'file-item';
+        const icon = f.name.toLowerCase().endsWith('.pdf') ? 'fa-file-pdf' : 'fa-file-image';
+        const size = f.size < 1024*1024 ? (f.size/1024).toFixed(0) + ' KB' : (f.size/1024/1024).toFixed(1) + ' MB';
+        div.innerHTML = `<i class="fas ${icon}"></i><span>${f.name}</span><span class="file-size">${size}</span>`;
+        fileList.appendChild(div);
+    });
+    if (submitBtn) submitBtn.disabled = files.length === 0;
+}
+
+if (form) {
+    form.addEventListener('submit', () => {
+        if (overlay) overlay.classList.add('active');
+        if (submitBtn) submitBtn.disabled = true;
+    });
+}
+</script>
+{% endblock %}

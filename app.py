@@ -4,7 +4,10 @@ Flask app avec questionnaire multi-étapes et interface moderne
 """
 
 import os
+import re
 import json
+import base64
+import anthropic
 from flask import Flask, render_template, request, session, redirect, url_for, jsonify
 from questionnaire import UserProfile, QuestionnaireEngine, QuestionType
 from recommender import RecommendationEngine
@@ -271,6 +274,181 @@ def api_cards():
         "welcome_bonus": c.welcome_bonus,
         "reward_program": c.reward_program,
     } for c in cards])
+
+
+def _analyser_releves_avec_claude(files):
+    """
+    Analyse des relevés de carte de crédit (PDF/images/texte) avec Claude Opus.
+    Retourne un dict avec les dépenses mensuelles moyennes par catégorie
+    et des informations sur les commerces habituels.
+    """
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+
+    content = []
+    uploaded_file_ids = []
+
+    for f in files:
+        if not f or f.filename == "":
+            continue
+        data = f.read()
+        fname = f.filename.lower()
+
+        if fname.endswith(".pdf"):
+            uploaded = client.beta.files.upload(
+                file=(f.filename, data, "application/pdf"),
+            )
+            uploaded_file_ids.append(uploaded.id)
+            content.append({
+                "type": "document",
+                "source": {"type": "file", "file_id": uploaded.id},
+            })
+        elif fname.endswith((".png", ".jpg", ".jpeg", ".webp")):
+            mt = "image/png" if fname.endswith(".png") else "image/jpeg"
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": mt,
+                    "data": base64.standard_b64encode(data).decode("utf-8"),
+                },
+            })
+        else:
+            content.append({
+                "type": "text",
+                "text": "Relevé de carte de crédit:\n" + data.decode("utf-8", errors="ignore"),
+            })
+
+    if not content:
+        raise ValueError("Aucun fichier valide fourni.")
+
+    content.append({
+        "type": "text",
+        "text": (
+            "Analysez ce ou ces relevé(s) de carte de crédit canadien(s) et extrayez les "
+            "dépenses MENSUELLES MOYENNES par catégorie.\n\n"
+            "Réponds UNIQUEMENT avec un objet JSON valide ayant exactement ces champs "
+            "(aucun texte avant ou après le JSON) :\n"
+            "{\n"
+            '  "spending_groceries": <montant CAD mensuel moyen - épicerie, supermarché>,\n'
+            '  "spending_gas": <montant CAD mensuel moyen - essence, carburant>,\n'
+            '  "spending_restaurants": <montant CAD mensuel moyen - restaurants, cafés, livraison repas (UberEats, DoorDash, Skip)>,\n'
+            '  "spending_pharmacy": <montant CAD mensuel moyen - pharmacie (Jean Coutu, Pharmaprix, etc.)>,\n'
+            '  "spending_transport": <montant CAD mensuel moyen - transport (Uber, taxi, STM/OPUS, stationnement)>,\n'
+            '  "spending_subscriptions": <montant CAD mensuel moyen - abonnements (téléphone, internet, Netflix, Spotify, Disney+, etc.)>,\n'
+            '  "spending_entertainment": <montant CAD mensuel moyen - divertissement (cinéma, événements, sports, etc.)>,\n'
+            '  "spending_online": <montant CAD mensuel moyen - achats en ligne (Amazon, boutiques web, etc.)>,\n'
+            '  "spending_foreign": <montant CAD mensuel moyen - transactions en devises étrangères (USD/EUR/etc.) - converti en CAD à 1.38 si nécessaire>,\n'
+            '  "grocery_stores": [liste des épiceries identifiées, ex: ["Maxi","IGA","Metro"]],\n'
+            '  "gas_stations": [liste des stations-essence, ex: ["Petro-Canada","Esso"]],\n'
+            '  "telecom_services": [liste des télécoms, ex: ["Fido","Bell","TELUS"]],\n'
+            '  "uses_costco": "Oui, régulièrement" | "Oui, occasionnellement" | "Rarement" | "Jamais",\n'
+            '  "uses_walmart": "Oui, régulièrement" | "Oui, occasionnellement" | "Rarement" | "Jamais",\n'
+            '  "amazon_usage": "Oui, je fais la majorité de mes achats en ligne via Amazon" | "Oui, mais c\'est un parmi plusieurs sites" | "Rarement" | "Jamais",\n'
+            '  "amazon_prime": true | false,\n'
+            '  "food_delivery": "Presque tous les jours" | "1–2 fois par semaine" | "1–3 fois par mois" | "Rarement",\n'
+            '  "months_analyzed": <nombre entier de mois couverts par les relevés>,\n'
+            '  "notes": "<courte note sur la fiabilité de l\'analyse>"\n'
+            "}\n\n"
+            "Règles importantes :\n"
+            "- Si plusieurs mois : calculez la MOYENNE mensuelle, pas le total\n"
+            "- Ignorez les remboursements/paiements de solde/frais annuels de carte\n"
+            "- Arrondissez chaque montant à l'entier le plus proche\n"
+            "- Si une catégorie n'apparaît pas : mets 0\n"
+        ),
+    })
+
+    use_files = bool(uploaded_file_ids)
+    create_kwargs = {
+        "model": "claude-opus-4-6",
+        "max_tokens": 2048,
+        "thinking": {"type": "adaptive"},
+        "system": (
+            "Tu es un expert-comptable spécialisé en analyse de relevés de carte de crédit "
+            "canadiens. Tu réponds UNIQUEMENT avec du JSON valide, sans aucun texte avant ou après."
+        ),
+        "messages": [{"role": "user", "content": content}],
+    }
+
+    if use_files:
+        response = client.beta.messages.create(**create_kwargs, betas=["files-api-2025-04-14"])
+    else:
+        response = client.messages.create(**create_kwargs)
+
+    # Cleanup uploaded files
+    for fid in uploaded_file_ids:
+        try:
+            client.beta.files.delete(fid)
+        except Exception:
+            pass
+
+    # Extract JSON from response
+    raw = next((b.text for b in response.content if b.type == "text"), "")
+    match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if match:
+        return json.loads(match.group())
+    return json.loads(raw)
+
+
+@app.route("/analyser-releves", methods=["GET", "POST"])
+def analyser_releves():
+    """Page d'upload et d'analyse automatique des relevés de carte de crédit."""
+    if request.method == "GET":
+        session.clear()
+        session["answers"] = {}
+        return render_template("upload_releve.html")
+
+    files = request.files.getlist("releves")
+    if not files or all(f.filename == "" for f in files):
+        return render_template("upload_releve.html", error="Veuillez sélectionner au moins un relevé.")
+
+    try:
+        result = _analyser_releves_avec_claude(files)
+
+        # Pré-remplir la session avec les données extraites
+        answers = session.get("answers", {})
+
+        champs_numeriques = [
+            "spending_groceries", "spending_gas", "spending_restaurants",
+            "spending_pharmacy", "spending_transport", "spending_subscriptions",
+            "spending_entertainment", "spending_online",
+        ]
+        for champ in champs_numeriques:
+            if champ in result and result[champ] is not None:
+                answers[champ] = float(result[champ])
+
+        if result.get("spending_foreign"):
+            answers["spending_foreign"] = float(result["spending_foreign"])
+
+        for champ_liste in ["grocery_stores", "gas_stations", "telecom_services"]:
+            if result.get(champ_liste):
+                answers[champ_liste] = result[champ_liste]
+
+        for champ_str in ["uses_costco", "uses_walmart", "amazon_usage", "food_delivery"]:
+            if result.get(champ_str):
+                answers[champ_str] = result[champ_str]
+
+        if result.get("amazon_prime") is not None:
+            answers["amazon_prime"] = "Oui" if result["amazon_prime"] else "Non"
+
+        total_spending = sum(float(result.get(c, 0) or 0) for c in champs_numeriques)
+        answers["spending_auto_filled"] = True
+
+        session["answers"] = answers
+        session["spending_auto"] = result
+
+        return render_template(
+            "upload_releve.html",
+            result=result,
+            success=True,
+            total_spending=round(total_spending),
+        )
+
+    except Exception as e:
+        app.logger.error(f"Erreur analyse relevés: {e}")
+        return render_template(
+            "upload_releve.html",
+            error=f"Erreur lors de l'analyse : {str(e)}",
+        )
 
 
 if __name__ == "__main__":

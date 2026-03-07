@@ -26,9 +26,9 @@
                 <i class="fas fa-wand-magic-sparkles"></i>
                 Commencer l'analyse gratuite
             </a>
-            <a href="{{ url_for('all_cards') }}" class="btn btn-ghost btn-xl">
-                <i class="fas fa-th-list"></i>
-                Voir toutes les cartes
+            <a href="{{ url_for('analyser_releves') }}" class="btn btn-ghost btn-xl">
+                <i class="fas fa-file-arrow-up"></i>
+                Analyser mes relevés avec l'IA
             </a>
         </div>
         <div class="hero-stats">
@@ -130,11 +130,17 @@
     <div class="container">
         <div class="cta-card">
             <h2 class="cta-title">Prêt à trouver votre carte parfaite?</h2>
-            <p class="cta-subtitle">Le questionnaire prend environ 5 minutes. Vos données ne sont jamais sauvegardées.</p>
-            <a href="{{ url_for('questionnaire_start') }}" class="btn btn-primary btn-xl">
-                <i class="fas fa-arrow-right"></i>
-                Démarrer maintenant — c'est gratuit
-            </a>
+            <p class="cta-subtitle">Répondez au questionnaire en 5 minutes, ou laissez l'IA analyser vos relevés automatiquement.</p>
+            <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;">
+                <a href="{{ url_for('questionnaire_start') }}" class="btn btn-primary btn-xl">
+                    <i class="fas fa-arrow-right"></i>
+                    Démarrer le questionnaire
+                </a>
+                <a href="{{ url_for('analyser_releves') }}" class="btn btn-ghost btn-xl">
+                    <i class="fas fa-file-arrow-up"></i>
+                    Analyser mes relevés
+                </a>
+            </div>
         </div>
     </div>
 </section>
