@@ -35,6 +35,15 @@ class RewardCategory:
 @dataclass
 class Insurance:
     travel_medical: bool = False
+    travel_medical_days: int = 0   # Durée réelle de couverture médicale voyage (jours)
+                                   # 0 = pas de couverture
+                                   # Valeurs typiques au Canada:
+                                   # 10-15j: cartes standard (CIBC, RBC entrée de gamme)
+                                   # 15j:    Amex Cobalt, Amex Gold, BMO WE, TD
+                                   # 21j:    BMO Ascend WE, TD First Class, Scotia Infinite
+                                   # 25j:    Scotia Gold Amex
+                                   # 31j:    Amex Platinum
+                                   # 60j:    Desjardins Odyssey World Elite (exceptionnelle)
     travel_cancellation: bool = False
     travel_interruption: bool = False
     baggage: bool = False
@@ -96,6 +105,9 @@ class CreditCard:
     gas_stations: List[str] = field(default_factory=list)
     restaurant_partners: List[str] = field(default_factory=list)
 
+    # Frais de change
+    no_fx_fee: bool = False  # True = aucun frais de conversion de devises
+
     # Compatibilité
     compatible_with_costco: bool = True  # False si Visa ou Amex
 
@@ -105,6 +117,13 @@ class CreditCard:
             if cat.category.lower() == category.lower():
                 return cat.rate
         return self.base_rate
+
+    def get_reward_cap(self, category: str) -> Optional[float]:
+        """Retourne le plafond mensuel pour une catégorie (None = pas de plafond)"""
+        for cat in self.reward_categories:
+            if cat.category.lower() == category.lower():
+                return cat.cap_monthly
+        return None
 
     def calculate_annual_value(self, spending: Dict[str, float]) -> float:
         """Calcule la valeur annuelle des récompenses basé sur les dépenses"""
@@ -2255,6 +2274,7 @@ def get_scotia_cards() -> List[CreditCard]:
         min_income_personal=60000,
         min_income_household=100000,
         min_credit_score=700,
+        no_fx_fee=True,
         base_rate=1.0,
         welcome_bonus=500,
         reward_program="Scene+",
@@ -3498,11 +3518,864 @@ def get_simplii_cards() -> List[CreditCard]:
 
 
 # ============================================================================
+# NOUVELLES CARTES (ajoutées mars 2026)
+# Sources: sites officiels banques, ratehub.ca, milesopedia.com, finlywealth.com
+# ============================================================================
+
+def get_new_cards() -> List[CreditCard]:
+    """Cartes manquantes ajoutées pour compléter la couverture FinlyWealth."""
+    cards = []
+
+    # ── SCOTIABANK ─────────────────────────────────────────────────────────
+
+    # Scotia Momentum Visa Infinite — carte cashback la plus populaire de Scotia
+    # 4% épicerie+récurrents (cap 25K$), 2% essence+transit, 1% autre
+    cards.append(CreditCard(
+        id="scotia_momentum_infinite",
+        name="Scotia Momentum Visa Infinite",
+        issuer="Banque Scotia",
+        network=CardNetwork.VISA,
+        tier=CardTier.CASHBACK,
+        annual_fee=120.0,
+        first_year_free=False,
+        interest_rate=20.99,
+        min_income_personal=60000,
+        min_income_household=100000,
+        min_credit_score=700,
+        base_rate=1.0,
+        welcome_bonus=200,
+        reward_program="Cashback",
+        reward_categories=[
+            RewardCategory("groceries",     4.0, cap_monthly=2083),  # 25K$/an
+            RewardCategory("subscriptions", 4.0, cap_monthly=2083),  # récurrents
+            RewardCategory("gas",           2.0),
+            RewardCategory("transport",     2.0),
+            RewardCategory("restaurants",   2.0),  # food delivery = 2%
+        ],
+        compatible_with_costco=False,
+        insurance=Insurance(
+            travel_medical=True,
+            travel_cancellation=True,
+            travel_interruption=True,
+            baggage=True,
+            car_rental=True,
+            purchase_protection=True,
+            extended_warranty=True,
+            mobile_device=False,
+        ),
+        travel_perks=TravelPerks(lounge_access=False),
+    ))
+
+    # Scotia Momentum No-Fee Visa — entrée de gamme cashback sans frais
+    cards.append(CreditCard(
+        id="scotia_momentum_nofee",
+        name="Scotia Momentum No-Fee Visa",
+        issuer="Banque Scotia",
+        network=CardNetwork.VISA,
+        tier=CardTier.CASHBACK,
+        annual_fee=0.0,
+        first_year_free=False,
+        interest_rate=19.99,
+        min_income_personal=0,
+        min_income_household=0,
+        min_credit_score=640,
+        base_rate=0.5,
+        welcome_bonus=0,
+        reward_program="Cashback",
+        reward_categories=[
+            RewardCategory("groceries",     1.0),
+            RewardCategory("gas",           1.0),
+            RewardCategory("pharmacy",      1.0),
+            RewardCategory("subscriptions", 1.0),
+        ],
+        compatible_with_costco=False,
+        insurance=Insurance(purchase_protection=True),
+        travel_perks=TravelPerks(),
+    ))
+
+    # ── TANGERINE ───────────────────────────────────────────────────────────
+
+    # Tangerine World Mastercard — $0 frais, 2% sur 2-3 catégories au choix
+    cards.append(CreditCard(
+        id="tangerine_world_mc",
+        name="Tangerine Money-Back World Mastercard",
+        issuer="Tangerine",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.CASHBACK,
+        annual_fee=0.0,
+        first_year_free=False,
+        interest_rate=19.95,
+        min_income_personal=60000,
+        min_income_household=100000,
+        min_credit_score=680,
+        base_rate=0.5,
+        welcome_bonus=120,
+        reward_program="Cashback",
+        reward_categories=[
+            # Utilisateur choisit 2-3 catégories parmi 13 — modélisé sur les plus communes
+            RewardCategory("groceries",     2.0),
+            RewardCategory("restaurants",   2.0),
+            RewardCategory("gas",           2.0),
+            RewardCategory("pharmacy",      2.0),
+            RewardCategory("subscriptions", 2.0),
+            RewardCategory("transport",     2.0),
+            RewardCategory("entertainment", 2.0),
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(
+            purchase_protection=True,
+            extended_warranty=True,
+        ),
+        travel_perks=TravelPerks(),
+    ))
+
+    # ── WEALTHSIMPLE ────────────────────────────────────────────────────────
+
+    # Wealthsimple Visa Infinite — 2% flat partout, $240/an (waivable)
+    cards.append(CreditCard(
+        id="wealthsimple_infinite",
+        name="Wealthsimple Visa Infinite",
+        issuer="Wealthsimple",
+        network=CardNetwork.VISA,
+        tier=CardTier.CASHBACK,
+        annual_fee=240.0,
+        first_year_free=False,
+        interest_rate=20.99,
+        min_income_personal=60000,
+        min_income_household=100000,
+        min_credit_score=700,
+        no_fx_fee=True,
+        base_rate=2.0,
+        welcome_bonus=0,
+        reward_program="Cashback",
+        reward_categories=[],  # Flat 2% partout, pas de catégories bonus
+        compatible_with_costco=False,
+        insurance=Insurance(
+            travel_medical=True,
+            travel_cancellation=True,
+            purchase_protection=True,
+            extended_warranty=True,
+            mobile_device=True,
+        ),
+        travel_perks=TravelPerks(),
+    ))
+
+    # ── ROGERS ──────────────────────────────────────────────────────────────
+
+    # Rogers Red World Elite Mastercard — $0 frais, 1.5-2% partout
+    cards.append(CreditCard(
+        id="rogers_red_world_elite_mc",
+        name="Rogers Red World Elite Mastercard",
+        issuer="Rogers Bank",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.CASHBACK,
+        annual_fee=0.0,
+        first_year_free=False,
+        interest_rate=19.99,
+        min_income_personal=80000,
+        min_income_household=150000,
+        min_credit_score=700,
+        base_rate=1.5,   # 1.5% si non-client Rogers, 2% si client Rogers/Fido
+        welcome_bonus=0,
+        reward_program="Cashback",
+        reward_categories=[
+            RewardCategory("online", 3.0),  # 3% USD
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(
+            travel_medical=True,
+            purchase_protection=True,
+            extended_warranty=True,
+        ),
+        travel_perks=TravelPerks(),
+    ))
+
+    # ── CIBC ────────────────────────────────────────────────────────────────
+
+    # CIBC Aeroplan Visa — carte Aéroplan sans frais, entrée de gamme
+    cards.append(CreditCard(
+        id="cibc_aeroplan_visa",
+        name="CIBC Aeroplan Visa",
+        issuer="CIBC",
+        network=CardNetwork.VISA,
+        tier=CardTier.TRAVEL,
+        annual_fee=0.0,
+        first_year_free=False,
+        interest_rate=20.99,
+        min_income_personal=0,
+        min_income_household=0,
+        min_credit_score=660,
+        base_rate=0.67,  # 1pt per $1.50 = ~0.67pt/$ × 1.2¢ = 0.8%
+        welcome_bonus=160,  # 10 000 pts Aéroplan ≈ $120-160 valeur
+        reward_program="Aéroplan",
+        reward_categories=[
+            RewardCategory("groceries", 1.0),   # 1pt/$
+            RewardCategory("gas",       1.0),   # 1pt/$
+        ],
+        compatible_with_costco=False,
+        insurance=Insurance(
+            purchase_protection=True,
+            extended_warranty=True,
+        ),
+        travel_perks=TravelPerks(),
+    ))
+
+    # ── NEO FINANCIAL ───────────────────────────────────────────────────────
+
+    # Neo World Mastercard — $0 frais, 2% groceries/gas/récurrents
+    cards.append(CreditCard(
+        id="neo_world_mc",
+        name="Neo World Mastercard",
+        issuer="Neo Financial",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.CASHBACK,
+        annual_fee=0.0,
+        first_year_free=False,
+        interest_rate=19.99,
+        min_income_personal=0,
+        min_income_household=0,
+        min_credit_score=650,
+        base_rate=0.5,
+        welcome_bonus=25,
+        reward_program="Cashback",
+        reward_categories=[
+            RewardCategory("groceries",     2.0),
+            RewardCategory("gas",           2.0),
+            RewardCategory("subscriptions", 2.0),
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(purchase_protection=True, extended_warranty=True),
+        travel_perks=TravelPerks(),
+    ))
+
+    # Neo Cathay World Elite Mastercard — 1 Asia Mile/$, prime Cathay Pacific
+    cards.append(CreditCard(
+        id="neo_cathay_world_elite",
+        name="Cathay World Elite Mastercard",
+        issuer="Neo Financial",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.TRAVEL,
+        annual_fee=180.0,
+        first_year_free=False,
+        interest_rate=20.99,
+        min_income_personal=80000,
+        min_income_household=150000,
+        min_credit_score=720,
+        base_rate=1.0,   # 1 Asia Mile/$ (CPP ~1.2-1.5¢)
+        welcome_bonus=750,  # ~60 000 Asia Miles ≈ $600-900 selon rachat
+        reward_program="Asia Miles",
+        reward_categories=[
+            RewardCategory("online", 2.0),  # 2x en devises étrangères
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(
+            travel_medical=True,
+            travel_cancellation=True,
+            travel_interruption=True,
+            baggage=True,
+            car_rental=True,
+            purchase_protection=True,
+            extended_warranty=True,
+        ),
+        travel_perks=TravelPerks(lounge_access=True, lounge_visits_per_year=4),
+    ))
+
+    # ── KOHO ────────────────────────────────────────────────────────────────
+    # Note: KOHO est une carte prépayée/de débit Mastercard, pas un crédit traditionnel.
+    # Inclus car FinlyWealth les liste et ils sont très populaires.
+    # Interest rate N/A (prépayé), mais on utilise 0 pour signifier pas d'intérêt.
+
+    # KOHO Essential — entrée de gamme, 1% épicerie+dining+transport
+    cards.append(CreditCard(
+        id="koho_essential",
+        name="KOHO Essential Mastercard",
+        issuer="KOHO",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.CASHBACK,
+        annual_fee=0.0,   # Gratuit avec dépôt direct, sinon ~$48
+        first_year_free=False,
+        interest_rate=0.0,  # Prépayé = pas d'intérêt
+        min_income_personal=0,
+        min_income_household=0,
+        min_credit_score=0,   # Approbation garantie (prépayé)
+        no_fx_fee=True,
+        base_rate=0.5,
+        welcome_bonus=0,
+        reward_program="Cashback",
+        reward_categories=[
+            RewardCategory("groceries",     1.0),
+            RewardCategory("restaurants",   1.0),
+            RewardCategory("transport",     1.0),
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(),
+        travel_perks=TravelPerks(),
+    ))
+
+    # KOHO Extra — 1.5% épicerie+dining+transport + 0.25% autre
+    cards.append(CreditCard(
+        id="koho_extra",
+        name="KOHO Extra Mastercard",
+        issuer="KOHO",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.CASHBACK,
+        annual_fee=144.0,  # $12/mois ou $144/an
+        first_year_free=False,
+        interest_rate=0.0,
+        min_income_personal=0,
+        min_income_household=0,
+        min_credit_score=0,
+        no_fx_fee=True,
+        base_rate=0.25,
+        welcome_bonus=0,
+        reward_program="Cashback",
+        reward_categories=[
+            RewardCategory("groceries",     1.5),
+            RewardCategory("restaurants",   1.5),
+            RewardCategory("transport",     1.5),
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(),
+        travel_perks=TravelPerks(),
+    ))
+
+    # KOHO Everything — 2% catégories principales, sans frais FX
+    cards.append(CreditCard(
+        id="koho_everything",
+        name="KOHO Everything Mastercard",
+        issuer="KOHO",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.CASHBACK,
+        annual_fee=228.0,  # ~$19/mois ou $228/an
+        first_year_free=False,
+        interest_rate=0.0,
+        min_income_personal=0,
+        min_income_household=0,
+        min_credit_score=0,
+        no_fx_fee=True,
+        base_rate=0.5,
+        welcome_bonus=0,
+        reward_program="Cashback",
+        reward_categories=[
+            RewardCategory("groceries",     2.0),
+            RewardCategory("restaurants",   2.0),
+            RewardCategory("transport",     2.0),
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(),
+        travel_perks=TravelPerks(),
+    ))
+
+    # ── BRIM FINANCIAL ──────────────────────────────────────────────────────
+
+    # Brim Mastercard — $0, 1% flat, frais FX 1.5% (anciennement 0%)
+    cards.append(CreditCard(
+        id="brim_mc",
+        name="BRIM Mastercard",
+        issuer="Brim Financial",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.CASHBACK,
+        annual_fee=0.0,
+        first_year_free=False,
+        interest_rate=19.99,
+        min_income_personal=0,
+        min_income_household=0,
+        min_credit_score=640,
+        base_rate=1.0,
+        welcome_bonus=50,
+        reward_program="Cashback",
+        reward_categories=[],  # Flat 1% partout
+        compatible_with_costco=True,
+        insurance=Insurance(purchase_protection=True),
+        travel_perks=TravelPerks(),
+    ))
+
+    # Brim World Elite Mastercard — $89, 2% flat, $80K revenu
+    cards.append(CreditCard(
+        id="brim_world_elite",
+        name="BRIM World Elite Mastercard",
+        issuer="Brim Financial",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.CASHBACK,
+        annual_fee=89.0,
+        first_year_free=False,
+        interest_rate=19.99,
+        min_income_personal=80000,
+        min_income_household=150000,
+        min_credit_score=700,
+        base_rate=2.0,
+        welcome_bonus=100,
+        reward_program="Cashback",
+        reward_categories=[],  # Flat 2% partout
+        compatible_with_costco=True,
+        insurance=Insurance(
+            travel_medical=True,
+            car_rental=True,
+            purchase_protection=True,
+            extended_warranty=True,
+        ),
+        travel_perks=TravelPerks(lounge_access=True, lounge_visits_per_year=4),
+    ))
+
+    # ── BMO VIPorter ────────────────────────────────────────────────────────
+
+    # BMO VIPorter Mastercard — $89 (1re année gratuite), Porter Airlines
+    cards.append(CreditCard(
+        id="bmo_viporter_mc",
+        name="BMO VIPorter Mastercard",
+        issuer="BMO",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.TRAVEL,
+        annual_fee=89.0,
+        first_year_free=True,
+        interest_rate=20.99,
+        min_income_personal=0,
+        min_income_household=0,
+        min_credit_score=660,
+        base_rate=0.5,   # 0.5pt/$ × 1.0¢ = 0.5%
+        welcome_bonus=320,  # ~40 000 VIPorter pts ≈ $320
+        reward_program="VIPorter Points",
+        reward_categories=[
+            RewardCategory("transport",     1.0),  # 1pt/$ transports
+            RewardCategory("gas",           1.0),
+            RewardCategory("groceries",     1.0),
+            RewardCategory("restaurants",   1.0),
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(
+            travel_medical=True,
+            travel_cancellation=True,
+            purchase_protection=True,
+            extended_warranty=True,
+        ),
+        travel_perks=TravelPerks(first_bag_free=False),
+    ))
+
+    # BMO VIPorter World Elite Mastercard — $199 (1re année gratuite), premium Porter
+    cards.append(CreditCard(
+        id="bmo_viporter_world_elite",
+        name="BMO VIPorter World Elite Mastercard",
+        issuer="BMO",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.TRAVEL,
+        annual_fee=199.0,
+        first_year_free=True,
+        interest_rate=20.99,
+        min_income_personal=80000,
+        min_income_household=150000,
+        min_credit_score=720,
+        base_rate=1.0,   # 1pt/$ × 1.0¢ = 1%
+        welcome_bonus=560,  # ~70 000 VIPorter pts ≈ $560
+        reward_program="VIPorter Points",
+        reward_categories=[
+            RewardCategory("groceries",     2.0, cap_monthly=833),   # cap $10K/an combiné dining
+            RewardCategory("restaurants",   2.0, cap_monthly=833),
+            RewardCategory("gas",           2.0, cap_monthly=417),   # cap $5K/an combiné transport
+            RewardCategory("transport",     2.0, cap_monthly=417),
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(
+            travel_medical=True,
+            travel_cancellation=True,
+            travel_interruption=True,
+            baggage=True,
+            car_rental=True,
+            purchase_protection=True,
+            extended_warranty=True,
+        ),
+        travel_perks=TravelPerks(
+            lounge_access=True,
+            lounge_visits_per_year=6,
+            companion_pass=True,
+        ),
+    ))
+
+    # ── TIM HORTONS ─────────────────────────────────────────────────────────
+
+    # Tims Mastercard — $0 frais, Tims Rewards
+    # 5pts/$ épicerie+essence+transit (cap $20K), 1pt/$2 autre
+    # 5pts × 0.4¢ = 2% effectif sur épicerie/essence/transit
+    cards.append(CreditCard(
+        id="tims_mc",
+        name="Tims Mastercard",
+        issuer="Tims Financial",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.CASHBACK,
+        annual_fee=0.0,
+        first_year_free=False,
+        interest_rate=19.99,
+        min_income_personal=0,
+        min_income_household=0,
+        min_credit_score=640,
+        base_rate=0.2,   # 1pt/$2 × 0.4¢ = 0.2%
+        welcome_bonus=0,
+        reward_program="Tims Rewards",
+        reward_categories=[
+            RewardCategory("groceries",  2.0, cap_monthly=1667),  # cap $20K/an
+            RewardCategory("gas",        2.0, cap_monthly=1667),
+            RewardCategory("transport",  2.0, cap_monthly=1667),
+            RewardCategory("restaurants", 6.0),  # 15pts/$ Tim Hortons ≈ 6% effectif
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(purchase_protection=True, extended_warranty=True),
+        travel_perks=TravelPerks(),
+    ))
+
+    # ── ATB FINANCIAL (Alberta seulement) ───────────────────────────────────
+
+    # ATB Gold Cash Rewards Mastercard — $0, 2% épicerie+dining+streaming
+    cards.append(CreditCard(
+        id="atb_gold_cash_rewards",
+        name="ATB Gold Cash Rewards Mastercard",
+        issuer="ATB Financial",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.CASHBACK,
+        annual_fee=0.0,
+        first_year_free=False,
+        interest_rate=19.99,
+        min_income_personal=0,
+        min_income_household=0,
+        min_credit_score=640,
+        base_rate=0.5,
+        welcome_bonus=0,
+        reward_program="Cashback",
+        reward_categories=[
+            RewardCategory("groceries",     2.0),
+            RewardCategory("restaurants",   2.0),
+            RewardCategory("subscriptions", 2.0),  # digital streaming
+            RewardCategory("gas",           1.0),
+            RewardCategory("online",        1.0),
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(purchase_protection=True, extended_warranty=True),
+        travel_perks=TravelPerks(),
+    ))
+
+    # ATB Gold My Rewards Mastercard — $0, points ATB My Rewards
+    cards.append(CreditCard(
+        id="atb_gold_my_rewards",
+        name="ATB Gold My Rewards Mastercard",
+        issuer="ATB Financial",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.CASHBACK,
+        annual_fee=0.0,
+        first_year_free=False,
+        interest_rate=19.99,
+        min_income_personal=0,
+        min_income_household=0,
+        min_credit_score=640,
+        base_rate=1.0,   # 1pt/$ × 1.0¢
+        welcome_bonus=0,
+        reward_program="ATB My Rewards",
+        reward_categories=[
+            RewardCategory("groceries",   2.0),
+            RewardCategory("restaurants", 2.0),
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(purchase_protection=True),
+        travel_perks=TravelPerks(),
+    ))
+
+    # ATB World Elite Mastercard — $120, 8pts voyage, 6pts épicerie+essence+stream+divert
+    # 8pts × ~0.01¢/pt = 8% voyage, 6pts = 6% épicerie/essence/streaming/entertainment
+    cards.append(CreditCard(
+        id="atb_world_elite",
+        name="ATB World Elite Mastercard",
+        issuer="ATB Financial",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.TRAVEL,
+        annual_fee=120.0,
+        first_year_free=False,
+        interest_rate=19.99,
+        min_income_personal=80000,
+        min_income_household=150000,
+        min_credit_score=720,
+        base_rate=2.0,   # 2pts/$ × 1.0¢
+        welcome_bonus=200,
+        reward_program="ATB My Rewards",
+        reward_categories=[
+            RewardCategory("groceries",     6.0),
+            RewardCategory("gas",           6.0),
+            RewardCategory("subscriptions", 6.0),
+            RewardCategory("entertainment", 6.0),
+            RewardCategory("transport",     8.0),  # airline/hotel/car rental
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(
+            travel_medical=True,
+            travel_cancellation=True,
+            travel_interruption=True,
+            baggage=True,
+            car_rental=True,
+            purchase_protection=True,
+            extended_warranty=True,
+        ),
+        travel_perks=TravelPerks(lounge_access=True, lounge_visits_per_year=6),
+    ))
+
+    # ── MERIDIAN CREDIT UNION (Ontario seulement) ────────────────────────────
+
+    # Meridian Visa Infinite Cash Back — $99 (1re année gratuite), 4% épicerie+essence
+    cards.append(CreditCard(
+        id="meridian_cashback_infinite",
+        name="Meridian Visa Infinite Cash Back",
+        issuer="Meridian Credit Union",
+        network=CardNetwork.VISA,
+        tier=CardTier.CASHBACK,
+        annual_fee=99.0,
+        first_year_free=True,
+        interest_rate=19.50,
+        min_income_personal=60000,
+        min_income_household=100000,
+        min_credit_score=700,
+        base_rate=1.0,
+        welcome_bonus=100,
+        reward_program="Cashback",
+        reward_categories=[
+            RewardCategory("groceries",     4.0, cap_monthly=2083),  # cap $25K/an combiné
+            RewardCategory("gas",           4.0, cap_monthly=2083),
+            RewardCategory("pharmacy",      2.0, cap_monthly=2083),
+            RewardCategory("subscriptions", 2.0, cap_monthly=2083),
+        ],
+        compatible_with_costco=False,
+        insurance=Insurance(
+            travel_medical=True,
+            travel_cancellation=True,
+            purchase_protection=True,
+            extended_warranty=True,
+            car_rental=True,
+        ),
+        travel_perks=TravelPerks(),
+    ))
+
+    # ── BANQUE NATIONALE ────────────────────────────────────────────────────
+
+    # National Bank Platinum Mastercard — ~$115, 2pts épicerie+restaurants
+    cards.append(CreditCard(
+        id="bnc_platinum_mc",
+        name="National Bank Platinum Mastercard",
+        issuer="Banque Nationale",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.CASHBACK,
+        annual_fee=115.0,
+        first_year_free=False,
+        interest_rate=20.99,
+        min_income_personal=0,
+        min_income_household=0,
+        min_credit_score=680,
+        base_rate=1.0,   # 1pt/$
+        welcome_bonus=100,
+        reward_program="À la carte Rewards",
+        reward_categories=[
+            RewardCategory("groceries",     2.0),
+            RewardCategory("restaurants",   2.0),
+            RewardCategory("gas",           1.5),
+            RewardCategory("subscriptions", 1.5),
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(
+            travel_medical=True,
+            purchase_protection=True,
+            extended_warranty=True,
+        ),
+        travel_perks=TravelPerks(),
+    ))
+
+    # National Bank mycredit Mastercard — $0, 1% restaurants+préautorisés
+    cards.append(CreditCard(
+        id="bnc_mycredit_mc",
+        name="National Bank mycredit Mastercard",
+        issuer="Banque Nationale",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.CASHBACK,
+        annual_fee=0.0,
+        first_year_free=False,
+        interest_rate=20.99,
+        min_income_personal=0,
+        min_income_household=0,
+        min_credit_score=640,
+        base_rate=0.5,
+        welcome_bonus=0,
+        reward_program="Cashback",
+        reward_categories=[
+            RewardCategory("restaurants",   1.0),
+            RewardCategory("subscriptions", 1.0),  # paiements préautorisés
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(purchase_protection=True),
+        travel_perks=TravelPerks(),
+    ))
+
+    # ── DESJARDINS (cartes manquantes) ──────────────────────────────────────
+
+    # Desjardins Bonus Visa — $0, cashback de base
+    cards.append(CreditCard(
+        id="desjardins_bonus_visa",
+        name="Desjardins Bonus Visa",
+        issuer="Desjardins",
+        network=CardNetwork.VISA,
+        tier=CardTier.CASHBACK,
+        annual_fee=0.0,
+        first_year_free=False,
+        interest_rate=19.90,
+        min_income_personal=0,
+        min_income_household=0,
+        min_credit_score=640,
+        base_rate=0.5,
+        welcome_bonus=0,
+        reward_program="BONUSDOLLARS",
+        reward_categories=[
+            RewardCategory("groceries", 1.0),
+            RewardCategory("gas",       1.0),
+        ],
+        compatible_with_costco=False,
+        insurance=Insurance(purchase_protection=True),
+        travel_perks=TravelPerks(),
+    ))
+
+    # Desjardins Cash Back Mastercard — $0, 1% partout
+    cards.append(CreditCard(
+        id="desjardins_cashback_mc",
+        name="Desjardins Cash Back Mastercard",
+        issuer="Desjardins",
+        network=CardNetwork.MASTERCARD,
+        tier=CardTier.CASHBACK,
+        annual_fee=0.0,
+        first_year_free=False,
+        interest_rate=19.90,
+        min_income_personal=0,
+        min_income_household=0,
+        min_credit_score=640,
+        base_rate=0.5,
+        welcome_bonus=0,
+        reward_program="Cashback",
+        reward_categories=[
+            RewardCategory("groceries",   1.0),
+            RewardCategory("gas",         1.0),
+            RewardCategory("restaurants", 1.0),
+        ],
+        compatible_with_costco=True,
+        insurance=Insurance(purchase_protection=True),
+        travel_perks=TravelPerks(),
+    ))
+
+    # Desjardins Odyssey Visa Infinite — tier entre Gold et World Elite
+    # ~$130/an, 2.5% voyage + 2% épicerie, couverture 60 jours médicale
+    cards.append(CreditCard(
+        id="desjardins_odyssey_infinite",
+        name="Desjardins Odyssey Visa Infinite",
+        issuer="Desjardins",
+        network=CardNetwork.VISA,
+        tier=CardTier.TRAVEL,
+        annual_fee=130.0,
+        first_year_free=False,
+        interest_rate=20.90,
+        min_income_personal=60000,
+        min_income_household=100000,
+        min_credit_score=700,
+        base_rate=1.5,
+        welcome_bonus=150,
+        reward_program="BONUSDOLLARS",
+        reward_categories=[
+            RewardCategory("transport",     2.5),   # voyage/transport
+            RewardCategory("groceries",     2.0),
+            RewardCategory("restaurants",   2.0),
+            RewardCategory("entertainment", 2.0),
+        ],
+        compatible_with_costco=False,
+        insurance=Insurance(
+            travel_medical=True,
+            travel_cancellation=True,
+            travel_interruption=True,
+            baggage=True,
+            car_rental=True,
+            purchase_protection=True,
+            extended_warranty=True,
+        ),
+        travel_perks=TravelPerks(lounge_access=False),
+    ))
+
+    return cards
+
+
+# ============================================================================
 # MAIN FUNCTION
 # ============================================================================
 
+# Durées réelles d'assurance médicale voyage par carte (jours).
+# Sources: guides officiels des émetteurs, ratehub.ca, milesopedia.com (2025).
+# Les cartes non listées ont travel_medical_days = 0 (pas de couverture).
+TRAVEL_MEDICAL_DAYS_MAP = {
+    # American Express
+    "amex_cobalt":              15,
+    "amex_gold":                15,
+    "amex_platinum":            31,   # Platinum = couverture la plus longue chez Amex
+    "amex_simplycash_preferred": 15,
+    "amex_aeroplan":            15,
+    "amex_aeroplan_reserve":    15,
+    # RBC
+    "rbc_avion_infinite":       15,
+    "rbc_avion_platinum":       15,
+    "rbc_avion_privilege":      31,   # Privilege = carte ultra-premium
+    "rbc_ba_infinite":          15,
+    "rbc_us_gold":              15,
+    "rbc_westjet_we":           15,
+    # TD
+    "td_aeroplan_infinite":     21,
+    "td_aeroplan_infinite_privilege": 31,
+    "td_aeroplan_platinum":     10,
+    "td_first_class_travel":    21,
+    "td_cashback_infinite":     10,
+    "td_platinum_travel":       10,
+    # BMO
+    "bmo_world_elite_mc":       21,
+    "bmo_cashback_we_mc":       21,
+    "bmo_eclipse_infinite":     10,
+    "bmo_ascend_we_mc":         21,
+    "bmo_air_miles_we_mc":      15,
+    # CIBC
+    "cibc_aeroplan_infinite":   15,
+    "cibc_aeroplan_infinite_privilege": 31,
+    "cibc_aventura_infinite":   10,
+    "cibc_dividend_infinite":   10,
+    "cibc_dividend_platinum":   10,
+    # Scotiabank
+    "scotia_passport_infinite": 25,
+    "scotia_gold_amex":         25,
+    "scotia_platinum_amex":     25,
+    # Desjardins (couvertures exceptionnellement longues — meilleure au Canada)
+    "desjardins_odyssey_we_mc": 60,
+    "desjardins_cashback_we_mc": 60,
+    "desjardins_odyssey_gold_visa": 60,
+    # Banque Nationale
+    "bnc_world_elite_mc":       60,   # BNC = aussi 60j comme Desjardins
+    "bnc_platine_mc":           15,
+    # Rogers / Fido / PC / Neo
+    "rogers_world_elite_mc":    10,
+    "pc_world_elite_mc":        15,
+    "neo_world_elite_mc":       15,
+    # MBNA
+    "mbna_rewards_we_mc":       15,
+    # Canadian Tire Triangle
+    "triangle_world_elite_mc":  10,
+    "triangle_world_mc":        10,
+    # Nouvelles cartes ajoutées mars 2026
+    "scotia_momentum_infinite":     25,
+    "wealthsimple_infinite":        15,
+    "brim_world_elite":             10,
+    "bmo_viporter_mc":              10,
+    "bmo_viporter_world_elite":     21,
+    "atb_world_elite":              15,
+    "meridian_cashback_infinite":   15,
+    "rogers_red_world_elite_mc":    10,
+    "bnc_platinum_mc":              15,
+    "neo_cathay_world_elite":       15,
+    "desjardins_odyssey_infinite":  60,
+}
+
+
 def get_all_cards() -> List[CreditCard]:
-    """Retourne toutes les cartes de crédit dans la base de données"""
+    """Retourne toutes les cartes de crédit dans la base de données."""
     all_cards = (
         get_amex_cards() +
         get_rbc_cards() +
@@ -3521,8 +4394,13 @@ def get_all_cards() -> List[CreditCard]:
         get_capital_one_cards() +
         get_triangle_cards() +
         get_home_trust_cards() +
-        get_simplii_cards()
+        get_simplii_cards() +
+        get_new_cards()
     )
+    # Appliquer les durées d'assurance médicale voyage connues
+    for card in all_cards:
+        if card.id in TRAVEL_MEDICAL_DAYS_MAP:
+            card.insurance.travel_medical_days = TRAVEL_MEDICAL_DAYS_MAP[card.id]
     return all_cards
 
 
