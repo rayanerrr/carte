@@ -5,8 +5,9 @@ Interface en ligne de commande
 
 import os
 import sys
+from typing import Dict
 from questionnaire import QuestionnaireEngine, QuestionType, UserProfile
-from recommender import RecommendationEngine, generate_recommendation_report
+from recommender import RecommendationEngine, DuoRecommendation, generate_recommendation_report
 from card_database import get_all_cards, CreditCard
 
 
@@ -197,6 +198,42 @@ def display_results(profile: UserProfile):
             print("\nℹ️  Avantages que vous possédez déjà:")
             for benefit in rec.already_has_benefits:
                 print(f"   • {benefit}")
+
+    # === DUO RECOMMENDATION ===
+    if profile.open_to_multiple != "Non, une seule carte":
+        duo = engine.recommend_duo()
+        if duo:
+            print("\n" + "=" * 70)
+            print("  💡 SOLUTION DUO — DEUX CARTES COMPLÉMENTAIRES")
+            print("=" * 70)
+            print(f"\n  Cette combinaison génère {duo.extra_gain:.0f}$ DE PLUS par an")
+            print(f"  que la meilleure carte seule ({duo.best_single_roi:.0f}$ → {duo.combined_roi:.0f}$)\n")
+
+            print(f"  🥇 CARTE PRINCIPALE : {duo.card_primary.name}")
+            print(f"     {duo.card_primary.issuer} | {duo.card_primary.network.value} | {duo.card_primary.annual_fee}$")
+            print(f"\n  🥈 CARTE SECONDAIRE : {duo.card_secondary.name}")
+            print(f"     {duo.card_secondary.issuer} | {duo.card_secondary.network.value} | {duo.card_secondary.annual_fee}$")
+
+            if duo.category_split:
+                # Group categories by winning card
+                split_by_card: Dict[str, list] = {}
+                for cat, winner in duo.category_split.items():
+                    split_by_card.setdefault(winner, []).append(cat)
+
+                cat_labels = {
+                    "groceries": "Épicerie", "gas": "Essence",
+                    "restaurants": "Restaurants", "pharmacy": "Pharmacie",
+                    "transport": "Transport", "subscriptions": "Abonnements",
+                    "entertainment": "Divertissement", "online": "Achats en ligne",
+                    "electronics": "Électronique", "clothing": "Vêtements",
+                    "healthcare": "Santé", "business": "Business",
+                }
+                print("\n  📊 RÉPARTITION OPTIMALE DES DÉPENSES:")
+                for card_name, cats in split_by_card.items():
+                    labels = [cat_labels.get(c, c) for c in cats]
+                    print(f"     → {card_name}: {', '.join(labels)}")
+
+            print()
 
     print("\n" + "=" * 70)
     print("💡 CONSEIL: Le ROI est calculé selon VOS dépenses réelles.")

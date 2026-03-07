@@ -142,6 +142,13 @@ class UserProfile:
     must_have_feature: str = ""
     other_info: str = ""
 
+    # Section 12 - Nuances de priorités (pour pondération dynamique)
+    insurance_importance: str = ""        # Importance des assurances
+    travel_perks_importance: str = ""     # Importance des avantages voyage premium
+    everyday_rewards_importance: str = "" # Importance des récompenses quotidiennes
+    simplicity_preference: str = ""       # Simplicité vs optimisation maximale
+    typical_trip_duration: str = ""       # Durée typique d'un voyage (jours)
+
     # ============== SECTION 12 - OPTIMISATION ACTUARIELLE ==============
     # Dépenses en devises étrangères (mensuel)
     spending_foreign: float = 0.0
@@ -465,6 +472,21 @@ class QuestionnaireEngine:
         ))
 
         questions.append(Question(
+            id="typical_trip_duration",
+            text="Quelle est la durée typique de vos voyages ?",
+            question_type=QuestionType.SINGLE_CHOICE,
+            section="Voyages",
+            show_condition={"travel_frequency_not": "Jamais ou presque"},
+            options=[
+                "Moins de 7 jours (courts séjours, week-ends)",
+                "7 à 14 jours (1-2 semaines)",
+                "15 à 21 jours (2-3 semaines)",
+                "22 à 30 jours (environ 1 mois)",
+                "Plus de 30 jours (longs séjours)"
+            ]
+        ))
+
+        questions.append(Question(
             id="airlines",
             text="Quelle(s) compagnie(s) aérienne(s) utilisez-vous le plus souvent ?",
             question_type=QuestionType.MULTI_CHOICE,
@@ -582,6 +604,60 @@ class QuestionnaireEngine:
                 "Avantages dans des commerces spécifiques",
                 "Assurances (achats, appareils, voyage)",
                 "Accumulation rapide pour un voyage spécifique"
+            ]
+        ))
+
+        # ============== SECTION 7b - NUANCES DE PRIORITÉS ==============
+        questions.append(Question(
+            id="everyday_rewards_importance",
+            text="À quel point les récompenses sur vos achats quotidiens (épicerie, essence, restaurants) sont-elles importantes pour vous ?",
+            question_type=QuestionType.SINGLE_CHOICE,
+            section="Préférences",
+            options=[
+                "Très importantes — c'est ma priorité #1",
+                "Importantes — j'y tiens beaucoup",
+                "Modérément importantes",
+                "Peu importantes — j'ai d'autres priorités"
+            ]
+        ))
+
+        questions.append(Question(
+            id="insurance_importance",
+            text="Quelle importance accordez-vous aux assurances offertes par votre carte de crédit (voyage, achats, appareils mobiles) ?",
+            question_type=QuestionType.SINGLE_CHOICE,
+            section="Préférences",
+            options=[
+                "Très importante — c'est une priorité essentielle pour moi",
+                "Importante — j'y tiens si c'est inclus",
+                "Modérément importante — un plus, mais pas décisif",
+                "Peu importante — je suis déjà bien couvert(e) ou m'en fous"
+            ]
+        ))
+
+        questions.append(Question(
+            id="travel_perks_importance",
+            text="Quelle importance accordez-vous aux avantages voyage premium (accès salons, crédits voyage, statut hôtel) ?",
+            question_type=QuestionType.SINGLE_CHOICE,
+            section="Préférences",
+            show_condition={"travel_frequency_not": "Jamais ou presque"},
+            options=[
+                "Très importants — je voyage souvent et j'en profite pleinement",
+                "Importants — si inclus dans la carte, je les utilise",
+                "Modérément importants — un plus appréciable",
+                "Peu importants — je préfère maximiser les récompenses directes"
+            ]
+        ))
+
+        questions.append(Question(
+            id="simplicity_preference",
+            text="Quel est votre rapport avec la gestion de votre carte de crédit ?",
+            question_type=QuestionType.SINGLE_CHOICE,
+            section="Préférences",
+            options=[
+                "Je veux la simplicité absolue — une carte, pas de gestion",
+                "Je suis prêt(e) à un minimum d'efforts pour maximiser",
+                "J'aime optimiser — je peux gérer plusieurs cartes et programmes",
+                "Je suis un(e) expert(e) en points — j'optimise au maximum"
             ]
         ))
 
