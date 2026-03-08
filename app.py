@@ -276,74 +276,42 @@ def api_cards():
 
 
 # ---------------------------------------------------------------------------
-# Classificateur de relevés — 100% local, aucune API externe
+# Classificateur de relevés — ML (TF-IDF + Régression Logistique)
 # ---------------------------------------------------------------------------
 
-_CATEGORY_KEYWORDS = {
-    "spending_groceries": [
-        "maxi", "iga ", " iga#", "metro ", "provigo", "loblaws", "loblaw",
-        "super-c", "super c", "superc", "grocery", "groceries", "alimentation",
-        "marche tau", "sobeys", "safeway", "freshco", "no frills", "nofrills",
-        "food basics", "save on foods", "t&t supermarket", "whole foods",
-        "farm boy", "pc express", "instacart", "epicerie", "supermarche",
-        "supermarché", "walmart grocery",
-    ],
-    "spending_gas": [
-        "petro-canada", "petrocanada", "petro canada", "petro-can",
-        "esso", "shell", "ultramar", "irving oil", "pioneer", "sunoco",
-        "canadian tire gas", "ct gas bar", "couche-tard gas", "couche tard gas",
-    ],
-    "spending_restaurants": [
-        "mcdonald", "tim horton", "timhorton", "subway ", "pizza hut",
-        "pizza pizza", "domino", "restaurant", "cafe ", "cafe-", "coffee",
-        "starbucks", "second cup", "secondcup", "uber eats", "ubereats",
-        "doordash", "door dash", "skip the dishes", "skipthedishes",
-        "burger king", "burgerking", "kfc ", "a&w ", "harvey", "wendy",
-        "popeyes", "five guys", "chipotle", "scores ", "la belle province",
-        "st-hubert", "saint hubert", "baton rouge", "boston pizza",
-        "dairy queen", " dq ", "bistro", "brasserie", "sushi", "thai ",
-        "pho ", "buffet", "greek", "italian", "chinese", "mexican",
-        " bar ", " pub ", "tavern", "grill", "bbq", "swiss chalet",
-        "east side mario", "kelseys", "moxies", "cactus club",
-        "grubhub", "foodora",
-    ],
-    "spending_pharmacy": [
-        "jean coutu", "jean-coutu", "pharmaprix", "shoppers drug",
-        "shoppers ", "uniprix", "proxim ", "brunet ", "rexall",
-        "pharma", "pharmacie", "drug mart",
-    ],
-    "spending_transport": [
-        "uber ", "lyft ", " taxi", "stm ", "rtc ", "sto ", "via rail",
-        "viarail", "go transit", "gotransit", " parking", "stationnement",
-        "presto card", "opus ", "greyhound", "megabus", "flixbus",
-        "communauto", "car2go", "bixi",
-    ],
-    "spending_subscriptions": [
-        "netflix", "spotify", "apple.com", "apple subscr", "itunes",
-        "google play", "google one", "disney+", "disney plus", "disneyplus",
-        "amazon prime", "amazon music", "bell canada", "bell mobility",
-        "bell fibe", "videotron", "vidéotron", "telus ", "rogers ", "fido ",
-        "koodo", "virgin mobile", "virgin plus", "freedom mobile",
-        "chatr", "public mobile", "hulu", "crave", "paramount",
-        "adobe ", "microsoft 365", "office 365", "dropbox",
-        "icloud", "youtube premium", "twitch", "patreon", "tou.tv", "dazn",
-    ],
-    "spending_entertainment": [
-        "cineplex", " cinema", "ticketmaster", "eventbrite", "steam ",
-        "playstation", " xbox", "nintendo", "goodlife", "anytime fitness",
-        " ymca", " gym ", "chapters", "indigo ", "musee", "musée",
-        "theatre", "théâtre", "concert", "festival", "loto ", "casino",
-        "cirque du soleil",
-    ],
-    "spending_online": [
-        "amazon.ca", "amazon.com", "ebay", "etsy ", "aliexpress",
-        "wish ", "shein", "wayfair", "bestbuy", "best buy",
-        "canadacomputers", "canada computers", "newegg", "paypal ",
-        "zara", " h&m", "asos", "ssense", "simons", "reitmans",
-        "dynamite", "ardene", "nike ", "adidas", "sportchek", "sport chek",
-        "sail ", "mec ", "mountain equipment",
-    ],
-}
+_CLASSIFIER = None  # chargé au premier appel
+
+
+def _load_classifier():
+    """Charge le modèle ML depuis le disque, ou l'entraîne si absent."""
+    global _CLASSIFIER
+    if _CLASSIFIER is not None:
+        return _CLASSIFIER
+
+    import joblib
+    from pathlib import Path
+    pkl = Path(__file__).parent / "merchant_classifier.pkl"
+
+    if not pkl.exists():
+        app.logger.info("merchant_classifier.pkl absent — entraînement en cours...")
+        from train_classifier import train
+        train()
+
+    _CLASSIFIER = joblib.load(pkl)
+    app.logger.info("Classifieur ML chargé.")
+    return _CLASSIFIER
+
+
+def _classify_description(clf, description: str) -> str:
+    """Prédit la catégorie d'une description de transaction.
+    Retourne None si la confiance est trop faible (<35 %)."""
+    desc = description.upper()
+    proba = clf.predict_proba([desc])[0]
+    best_idx = proba.argmax()
+    confidence = proba[best_idx]
+    if confidence < 0.35:
+        return None
+    return clf.classes_[best_idx]
 
 _SKIP_KEYWORDS = [
     "balance", "solde", "total", "paiement", "payment", " credit ", " crédit ",
@@ -525,7 +493,7 @@ def _detect_food_delivery(text_lower):
 def _analyser_releves_local(files):
     """
     Analyse des relevés de carte de crédit sans API externe.
-    Extraction PDF + classificateur par mots-clés.
+    Extraction PDF + classifieur ML (TF-IDF + Régression Logistique).
     """
     text = _extraire_texte(files)
     text_lower = text.lower()
@@ -533,21 +501,19 @@ def _analyser_releves_local(files):
     transactions = _extraire_transactions(text)
     months = _detect_months(text)
 
-    totals = defaultdict(float)
-    unclassified = 0
-    for t in transactions:
-        desc = t["description"].lower()
-        classified = False
-        for cat, keywords in _CATEGORY_KEYWORDS.items():
-            if any(kw in desc for kw in keywords):
-                totals[cat] += t["amount"]
-                classified = True
-                break
-        if not classified:
-            unclassified += t["amount"]
+    clf = _load_classifier()
 
-    # Répartir les non-classifiés dans online (achat divers)
-    totals["spending_online"] += unclassified * 0.4
+    totals = defaultdict(float)
+    unclassified_amount = 0.0
+    for t in transactions:
+        cat = _classify_description(clf, t["description"])
+        if cat:
+            totals[cat] += t["amount"]
+        else:
+            unclassified_amount += t["amount"]
+
+    # Les non-classifiés vont en partie dans achats divers
+    totals["spending_online"] += unclassified_amount * 0.35
 
     stores = _detect_stores(text_lower)
 
