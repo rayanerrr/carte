@@ -3,11 +3,10 @@ Application Web - Recommandateur de Cartes de Crédit Canadiennes
 Flask app avec questionnaire multi-étapes et interface moderne
 """
 
+import io
 import os
 import re
-import json
-import base64
-import anthropic
+from collections import defaultdict
 from flask import Flask, render_template, request, session, redirect, url_for, jsonify
 from questionnaire import UserProfile, QuestionnaireEngine, QuestionType
 from recommender import RecommendationEngine
@@ -276,17 +275,142 @@ def api_cards():
     } for c in cards])
 
 
-def _analyser_releves_avec_claude(files):
-    """
-    Analyse des relevés de carte de crédit (PDF/images/texte) avec Claude Opus.
-    Retourne un dict avec les dépenses mensuelles moyennes par catégorie
-    et des informations sur les commerces habituels.
-    """
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+# ---------------------------------------------------------------------------
+# Classificateur de relevés — 100% local, aucune API externe
+# ---------------------------------------------------------------------------
 
-    content = []
-    uploaded_file_ids = []
+_CATEGORY_KEYWORDS = {
+    "spending_groceries": [
+        "maxi", "iga ", " iga#", "metro ", "provigo", "loblaws", "loblaw",
+        "super-c", "super c", "superc", "grocery", "groceries", "alimentation",
+        "marche tau", "sobeys", "safeway", "freshco", "no frills", "nofrills",
+        "food basics", "save on foods", "t&t supermarket", "whole foods",
+        "farm boy", "pc express", "instacart", "epicerie", "supermarche",
+        "supermarché", "walmart grocery",
+    ],
+    "spending_gas": [
+        "petro-canada", "petrocanada", "petro canada", "petro-can",
+        "esso", "shell", "ultramar", "irving oil", "pioneer", "sunoco",
+        "canadian tire gas", "ct gas bar", "couche-tard gas", "couche tard gas",
+    ],
+    "spending_restaurants": [
+        "mcdonald", "tim horton", "timhorton", "subway ", "pizza hut",
+        "pizza pizza", "domino", "restaurant", "cafe ", "cafe-", "coffee",
+        "starbucks", "second cup", "secondcup", "uber eats", "ubereats",
+        "doordash", "door dash", "skip the dishes", "skipthedishes",
+        "burger king", "burgerking", "kfc ", "a&w ", "harvey", "wendy",
+        "popeyes", "five guys", "chipotle", "scores ", "la belle province",
+        "st-hubert", "saint hubert", "baton rouge", "boston pizza",
+        "dairy queen", " dq ", "bistro", "brasserie", "sushi", "thai ",
+        "pho ", "buffet", "greek", "italian", "chinese", "mexican",
+        " bar ", " pub ", "tavern", "grill", "bbq", "swiss chalet",
+        "east side mario", "kelseys", "moxies", "cactus club",
+        "grubhub", "foodora",
+    ],
+    "spending_pharmacy": [
+        "jean coutu", "jean-coutu", "pharmaprix", "shoppers drug",
+        "shoppers ", "uniprix", "proxim ", "brunet ", "rexall",
+        "pharma", "pharmacie", "drug mart",
+    ],
+    "spending_transport": [
+        "uber ", "lyft ", " taxi", "stm ", "rtc ", "sto ", "via rail",
+        "viarail", "go transit", "gotransit", " parking", "stationnement",
+        "presto card", "opus ", "greyhound", "megabus", "flixbus",
+        "communauto", "car2go", "bixi",
+    ],
+    "spending_subscriptions": [
+        "netflix", "spotify", "apple.com", "apple subscr", "itunes",
+        "google play", "google one", "disney+", "disney plus", "disneyplus",
+        "amazon prime", "amazon music", "bell canada", "bell mobility",
+        "bell fibe", "videotron", "vidéotron", "telus ", "rogers ", "fido ",
+        "koodo", "virgin mobile", "virgin plus", "freedom mobile",
+        "chatr", "public mobile", "hulu", "crave", "paramount",
+        "adobe ", "microsoft 365", "office 365", "dropbox",
+        "icloud", "youtube premium", "twitch", "patreon", "tou.tv", "dazn",
+    ],
+    "spending_entertainment": [
+        "cineplex", " cinema", "ticketmaster", "eventbrite", "steam ",
+        "playstation", " xbox", "nintendo", "goodlife", "anytime fitness",
+        " ymca", " gym ", "chapters", "indigo ", "musee", "musée",
+        "theatre", "théâtre", "concert", "festival", "loto ", "casino",
+        "cirque du soleil",
+    ],
+    "spending_online": [
+        "amazon.ca", "amazon.com", "ebay", "etsy ", "aliexpress",
+        "wish ", "shein", "wayfair", "bestbuy", "best buy",
+        "canadacomputers", "canada computers", "newegg", "paypal ",
+        "zara", " h&m", "asos", "ssense", "simons", "reitmans",
+        "dynamite", "ardene", "nike ", "adidas", "sportchek", "sport chek",
+        "sail ", "mec ", "mountain equipment",
+    ],
+}
 
+_SKIP_KEYWORDS = [
+    "balance", "solde", "total", "paiement", "payment", " credit ", " crédit ",
+    "interest", "intérêt", "frais annuel", "annual fee", "minimum payment",
+    "new balance", "previous balance", "opening balance", "closing balance",
+    "interest charge", "frais de change", "transfert", "transfer",
+    "mise en garde", "statement", "relevé",
+]
+
+_STORE_MAP = {
+    "grocery_stores": [
+        ("Maxi",       ["maxi"]),
+        ("IGA",        ["iga "]),
+        ("Metro",      ["metro "]),
+        ("Provigo",    ["provigo"]),
+        ("Loblaws",    ["loblaws", "loblaw"]),
+        ("Costco",     ["costco"]),
+        ("Walmart",    ["walmart"]),
+        ("Super C",    ["super-c", "super c"]),
+        ("Sobeys",     ["sobeys"]),
+        ("FreshCo",    ["freshco"]),
+        ("No Frills",  ["no frills"]),
+        ("Farm Boy",   ["farm boy"]),
+    ],
+    "gas_stations": [
+        ("Petro-Canada",   ["petro-canada", "petrocanada", "petro canada"]),
+        ("Esso",           ["esso"]),
+        ("Shell",          ["shell"]),
+        ("Ultramar",       ["ultramar"]),
+        ("Canadian Tire",  ["canadian tire gas"]),
+        ("Pioneer",        ["pioneer"]),
+        ("Irving",         ["irving oil"]),
+    ],
+    "telecom_services": [
+        ("Bell",           ["bell canada", "bell mobility", "bell fibe"]),
+        ("Vidéotron",      ["videotron", "vidéotron"]),
+        ("TELUS",          ["telus "]),
+        ("Rogers",         ["rogers "]),
+        ("Fido",           ["fido "]),
+        ("Koodo",          ["koodo"]),
+        ("Virgin",         ["virgin mobile", "virgin plus"]),
+        ("Freedom Mobile", ["freedom mobile"]),
+        ("Public Mobile",  ["public mobile"]),
+    ],
+}
+
+_DATE_RE = re.compile(
+    r"^(?:\d{4}-\d{2}-\d{2}"
+    r"|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?"
+    r"|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
+    r"|Janv?|F[eé]vr?|Mars|Avr|Mai|Juin|Juil|A[oô]ut|Sept?|Oct|Nov|D[eé]c)\w*\.?\s+\d{1,2}(?:\s+\d{4})?"
+    r"|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
+    r"|Janv?|F[eé]vr?|Mars|Avr|Mai|Juin|Juil|A[oô]ut|Sept?|Oct|Nov|D[eé]c)\w*\.?(?:\s+\d{4})?)",
+    re.IGNORECASE,
+)
+
+_AMOUNT_RE = re.compile(r"([\d,]{1,6}\.\d{2})\s*(?:CR|DB|cr|db)?\s*$")
+
+
+def _extraire_texte(files):
+    """Extrait le texte brut de tous les fichiers uploadés (PDF ou texte)."""
+    try:
+        import pdfplumber
+    except ImportError:
+        raise ValueError("pdfplumber n'est pas installé. Relancez : pip install pdfplumber")
+
+    all_text = ""
     for f in files:
         if not f or f.filename == "":
             continue
@@ -294,99 +418,180 @@ def _analyser_releves_avec_claude(files):
         fname = f.filename.lower()
 
         if fname.endswith(".pdf"):
-            uploaded = client.beta.files.upload(
-                file=(f.filename, data, "application/pdf"),
-            )
-            uploaded_file_ids.append(uploaded.id)
-            content.append({
-                "type": "document",
-                "source": {"type": "file", "file_id": uploaded.id},
-            })
+            with pdfplumber.open(io.BytesIO(data)) as pdf:
+                for page in pdf.pages:
+                    t = page.extract_text()
+                    if t:
+                        all_text += t + "\n"
+        elif fname.endswith((".txt", ".csv")):
+            all_text += data.decode("utf-8", errors="ignore") + "\n"
         elif fname.endswith((".png", ".jpg", ".jpeg", ".webp")):
-            mt = "image/png" if fname.endswith(".png") else "image/jpeg"
-            content.append({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": mt,
-                    "data": base64.standard_b64encode(data).decode("utf-8"),
-                },
-            })
-        else:
-            content.append({
-                "type": "text",
-                "text": "Relevé de carte de crédit:\n" + data.decode("utf-8", errors="ignore"),
-            })
+            raise ValueError(
+                "Les images ne sont pas supportées sans OCR. "
+                "Téléversez des fichiers PDF ou texte (.txt)."
+            )
 
-    if not content:
-        raise ValueError("Aucun fichier valide fourni.")
+    if not all_text.strip():
+        raise ValueError(
+            "Aucun texte extrait. Assurez-vous que vos PDFs ne sont pas scannés/image."
+        )
+    return all_text
 
-    content.append({
-        "type": "text",
-        "text": (
-            "Analysez ce ou ces relevé(s) de carte de crédit canadien(s) et extrayez les "
-            "dépenses MENSUELLES MOYENNES par catégorie.\n\n"
-            "Réponds UNIQUEMENT avec un objet JSON valide ayant exactement ces champs "
-            "(aucun texte avant ou après le JSON) :\n"
-            "{\n"
-            '  "spending_groceries": <montant CAD mensuel moyen - épicerie, supermarché>,\n'
-            '  "spending_gas": <montant CAD mensuel moyen - essence, carburant>,\n'
-            '  "spending_restaurants": <montant CAD mensuel moyen - restaurants, cafés, livraison repas (UberEats, DoorDash, Skip)>,\n'
-            '  "spending_pharmacy": <montant CAD mensuel moyen - pharmacie (Jean Coutu, Pharmaprix, etc.)>,\n'
-            '  "spending_transport": <montant CAD mensuel moyen - transport (Uber, taxi, STM/OPUS, stationnement)>,\n'
-            '  "spending_subscriptions": <montant CAD mensuel moyen - abonnements (téléphone, internet, Netflix, Spotify, Disney+, etc.)>,\n'
-            '  "spending_entertainment": <montant CAD mensuel moyen - divertissement (cinéma, événements, sports, etc.)>,\n'
-            '  "spending_online": <montant CAD mensuel moyen - achats en ligne (Amazon, boutiques web, etc.)>,\n'
-            '  "spending_foreign": <montant CAD mensuel moyen - transactions en devises étrangères (USD/EUR/etc.) - converti en CAD à 1.38 si nécessaire>,\n'
-            '  "grocery_stores": [liste des épiceries identifiées, ex: ["Maxi","IGA","Metro"]],\n'
-            '  "gas_stations": [liste des stations-essence, ex: ["Petro-Canada","Esso"]],\n'
-            '  "telecom_services": [liste des télécoms, ex: ["Fido","Bell","TELUS"]],\n'
-            '  "uses_costco": "Oui, régulièrement" | "Oui, occasionnellement" | "Rarement" | "Jamais",\n'
-            '  "uses_walmart": "Oui, régulièrement" | "Oui, occasionnellement" | "Rarement" | "Jamais",\n'
-            '  "amazon_usage": "Oui, je fais la majorité de mes achats en ligne via Amazon" | "Oui, mais c\'est un parmi plusieurs sites" | "Rarement" | "Jamais",\n'
-            '  "amazon_prime": true | false,\n'
-            '  "food_delivery": "Presque tous les jours" | "1–2 fois par semaine" | "1–3 fois par mois" | "Rarement",\n'
-            '  "months_analyzed": <nombre entier de mois couverts par les relevés>,\n'
-            '  "notes": "<courte note sur la fiabilité de l\'analyse>"\n'
-            "}\n\n"
-            "Règles importantes :\n"
-            "- Si plusieurs mois : calculez la MOYENNE mensuelle, pas le total\n"
-            "- Ignorez les remboursements/paiements de solde/frais annuels de carte\n"
-            "- Arrondissez chaque montant à l'entier le plus proche\n"
-            "- Si une catégorie n'apparaît pas : mets 0\n"
+
+def _extraire_transactions(text):
+    """Extrait les lignes de transaction (description + montant)."""
+    transactions = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if len(line) < 8:
+            continue
+
+        amount_m = _AMOUNT_RE.search(line)
+        if not amount_m:
+            continue
+
+        try:
+            amount = float(amount_m.group(1).replace(",", ""))
+        except ValueError:
+            continue
+
+        if amount <= 0 or amount > 9999:
+            continue
+
+        description = line[: amount_m.start()].strip()
+        date_m = _DATE_RE.match(description)
+        if date_m:
+            description = description[date_m.end():].strip()
+
+        if len(description) < 3:
+            continue
+
+        desc_lower = description.lower()
+        if any(kw in desc_lower for kw in _SKIP_KEYWORDS):
+            continue
+
+        transactions.append({"description": description, "amount": amount})
+
+    return transactions
+
+
+def _detect_months(text):
+    """Estime le nombre de mois couverts dans le texte."""
+    month_years = set()
+
+    for m in re.finditer(r"\b(\d{4})-(\d{2})-\d{2}\b", text):
+        month_years.add((m.group(1), m.group(2)))
+
+    month_map = {
+        "jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05",
+        "jun": "06", "jul": "07", "aug": "08", "sep": "09", "oct": "10",
+        "nov": "11", "dec": "12",
+        "janv": "01", "févr": "02", "fevr": "02", "mars": "03", "avr": "04",
+        "mai": "05", "juin": "06", "juil": "07", "août": "08", "aout": "08",
+        "sept": "09",
+    }
+    pattern = r"\b(" + "|".join(month_map.keys()) + r")[a-z]*\.?\s+(\d{4})\b"
+    for m in re.finditer(pattern, text, re.IGNORECASE):
+        key = m.group(1).lower()[:4]
+        if key in month_map:
+            month_years.add((m.group(2), month_map[key]))
+
+    return max(1, len(month_years))
+
+
+def _detect_stores(text_lower):
+    """Détecte les commerces spécifiques présents dans le texte."""
+    detected = {"grocery_stores": [], "gas_stations": [], "telecom_services": []}
+    for cat, stores in _STORE_MAP.items():
+        for name, keywords in stores:
+            if any(kw in text_lower for kw in keywords):
+                detected[cat].append(name)
+    return detected
+
+
+def _detect_food_delivery(text_lower):
+    kws = ["ubereats", "uber eats", "doordash", "door dash",
+           "skip the dishes", "skipthedishes", "foodora"]
+    total = sum(text_lower.count(kw) for kw in kws)
+    if total == 0:
+        return "Rarement"
+    if total >= 8:
+        return "Presque tous les jours"
+    if total >= 4:
+        return "1–2 fois par semaine"
+    return "1–3 fois par mois"
+
+
+def _analyser_releves_local(files):
+    """
+    Analyse des relevés de carte de crédit sans API externe.
+    Extraction PDF + classificateur par mots-clés.
+    """
+    text = _extraire_texte(files)
+    text_lower = text.lower()
+
+    transactions = _extraire_transactions(text)
+    months = _detect_months(text)
+
+    totals = defaultdict(float)
+    unclassified = 0
+    for t in transactions:
+        desc = t["description"].lower()
+        classified = False
+        for cat, keywords in _CATEGORY_KEYWORDS.items():
+            if any(kw in desc for kw in keywords):
+                totals[cat] += t["amount"]
+                classified = True
+                break
+        if not classified:
+            unclassified += t["amount"]
+
+    # Répartir les non-classifiés dans online (achat divers)
+    totals["spending_online"] += unclassified * 0.4
+
+    stores = _detect_stores(text_lower)
+
+    # Fréquence Costco/Walmart selon nombre d'occurrences
+    def _freq(keyword):
+        n = text_lower.count(keyword)
+        if n == 0:
+            return "Jamais"
+        if n >= 4:
+            return "Oui, régulièrement"
+        return "Oui, occasionnellement"
+
+    amazon_n = text_lower.count("amazon")
+    if amazon_n == 0:
+        amazon_usage = "Jamais"
+    elif amazon_n >= 5:
+        amazon_usage = "Oui, je fais la majorité de mes achats en ligne via Amazon"
+    else:
+        amazon_usage = "Oui, mais c'est un parmi plusieurs sites"
+
+    cats = [
+        "spending_groceries", "spending_gas", "spending_restaurants",
+        "spending_pharmacy", "spending_transport", "spending_subscriptions",
+        "spending_entertainment", "spending_online",
+    ]
+
+    result = {cat: round(totals[cat] / months) for cat in cats}
+    result.update({
+        "spending_foreign": 0,
+        "grocery_stores":   stores["grocery_stores"],
+        "gas_stations":     stores["gas_stations"],
+        "telecom_services": stores["telecom_services"],
+        "uses_costco":      _freq("costco"),
+        "uses_walmart":     _freq("walmart"),
+        "amazon_usage":     amazon_usage,
+        "amazon_prime":     "amazon prime" in text_lower,
+        "food_delivery":    _detect_food_delivery(text_lower),
+        "months_analyzed":  months,
+        "notes": (
+            f"{len(transactions)} transactions détectées sur {months} mois. "
+            "Vérifiez les montants — certains commerces peu connus peuvent être mal classifiés."
         ),
     })
-
-    use_files = bool(uploaded_file_ids)
-    create_kwargs = {
-        "model": "claude-opus-4-6",
-        "max_tokens": 2048,
-        "thinking": {"type": "adaptive"},
-        "system": (
-            "Tu es un expert-comptable spécialisé en analyse de relevés de carte de crédit "
-            "canadiens. Tu réponds UNIQUEMENT avec du JSON valide, sans aucun texte avant ou après."
-        ),
-        "messages": [{"role": "user", "content": content}],
-    }
-
-    if use_files:
-        response = client.beta.messages.create(**create_kwargs, betas=["files-api-2025-04-14"])
-    else:
-        response = client.messages.create(**create_kwargs)
-
-    # Cleanup uploaded files
-    for fid in uploaded_file_ids:
-        try:
-            client.beta.files.delete(fid)
-        except Exception:
-            pass
-
-    # Extract JSON from response
-    raw = next((b.text for b in response.content if b.type == "text"), "")
-    match = re.search(r"\{.*\}", raw, re.DOTALL)
-    if match:
-        return json.loads(match.group())
-    return json.loads(raw)
+    return result
 
 
 @app.route("/analyser-releves", methods=["GET", "POST"])
@@ -402,7 +607,7 @@ def analyser_releves():
         return render_template("upload_releve.html", error="Veuillez sélectionner au moins un relevé.")
 
     try:
-        result = _analyser_releves_avec_claude(files)
+        result = _analyser_releves_local(files)
 
         # Pré-remplir la session avec les données extraites
         answers = session.get("answers", {})
